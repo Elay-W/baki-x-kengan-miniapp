@@ -1,21 +1,28 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import PageShell from "@/components/PageShell";
 import { cards } from "@/data/cards";
 import { glassCard, primaryButton, secondaryButton, rarityColors } from "@/components/ui";
 import type { FighterCard } from "@/types/game";
+import { clearSavedDeck, loadDeck, saveDeck } from "@/lib/deckStorage";
 
 const DECK_SIZE = 5;
 
 export default function DeckPage() {
-  const [deck, setDeck] = useState<FighterCard[]>([
-    cards[0],
-    cards[2],
-    cards[3],
-  ]);
-
+  const [deck, setDeck] = useState<FighterCard[]>([]);
   const [query, setQuery] = useState("");
+  const [savedMessage, setSavedMessage] = useState("");
+
+  useEffect(() => {
+    const storedDeck = loadDeck();
+
+    if (storedDeck.length > 0) {
+      setDeck(storedDeck.slice(0, DECK_SIZE));
+    } else {
+      setDeck([cards[0], cards[2], cards[3]]);
+    }
+  }, []);
 
   const filteredCards = useMemo(() => {
     return cards.filter((card) =>
@@ -32,14 +39,23 @@ export default function DeckPage() {
     if (deck.length >= DECK_SIZE) return;
 
     setDeck((prev) => [...prev, card]);
+    setSavedMessage("");
   }
 
   function removeFromDeck(cardId: number) {
     setDeck((prev) => prev.filter((card) => card.id !== cardId));
+    setSavedMessage("");
   }
 
   function clearDeck() {
     setDeck([]);
+    clearSavedDeck();
+    setSavedMessage("Deck cleared.");
+  }
+
+  function handleSaveDeck() {
+    saveDeck(deck.map((card) => card.id));
+    setSavedMessage("Deck saved successfully.");
   }
 
   const isReady = deck.length === DECK_SIZE;
@@ -152,7 +168,7 @@ export default function DeckPage() {
             gap: 12,
           }}
         >
-          <button style={primaryButton()} disabled={!isReady}>
+          <button style={primaryButton()} disabled={!isReady} onClick={handleSaveDeck}>
             Save Deck
           </button>
 
@@ -165,12 +181,17 @@ export default function DeckPage() {
           style={{
             marginTop: 12,
             fontSize: 13,
-            color: isReady ? "#86efac" : "#a1a1aa",
+            color: savedMessage
+              ? "#86efac"
+              : isReady
+              ? "#86efac"
+              : "#a1a1aa",
           }}
         >
-          {isReady
-            ? "Deck is ready for battle."
-            : "Add more fighters to complete the deck."}
+          {savedMessage ||
+            (isReady
+              ? "Deck is ready for battle."
+              : "Add more fighters to complete the deck.")}
         </div>
       </div>
 

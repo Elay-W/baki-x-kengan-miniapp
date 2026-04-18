@@ -5,19 +5,17 @@ import PageShell from "@/components/PageShell";
 import SplashScreen from "@/components/SplashScreen";
 import { glassCard, secondaryButton } from "@/components/ui";
 import { useRouter } from "next/navigation";
+import { loadDeck } from "@/lib/deckStorage";
 
 export default function HomePage() {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [progress, setProgress] = useState(8);
-
-  const activeDeck = [
+  const [activeDeck, setActiveDeck] = useState<string[]>([
     "Yujiro Hanma",
     "Baki Hanma",
     "Tokita Ohma",
-    "Kuroki Gensai",
-    "Wakatsuki Takeshi",
-  ];
+  ]);
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -33,6 +31,13 @@ export default function HomePage() {
       clearInterval(interval);
       clearTimeout(timeout);
     };
+  }, []);
+
+  useEffect(() => {
+    const storedDeck = loadDeck();
+    if (storedDeck.length > 0) {
+      setActiveDeck(storedDeck.map((card) => card.name));
+    }
   }, []);
 
   return (
@@ -67,21 +72,25 @@ export default function HomePage() {
             </div>
 
             <div style={{ marginTop: 16, display: "flex", flexWrap: "wrap", gap: 8 }}>
-              {activeDeck.map((name) => (
-                <span
-                  key={name}
-                  style={{
-                    padding: "8px 12px",
-                    borderRadius: 999,
-                    border: "1px solid rgba(255,255,255,0.10)",
-                    background: "rgba(255,255,255,0.04)",
-                    fontSize: 12,
-                    color: "#d4d4d8",
-                  }}
-                >
-                  {name}
-                </span>
-              ))}
+              {activeDeck.length > 0 ? (
+                activeDeck.map((name) => (
+                  <span
+                    key={name}
+                    style={{
+                      padding: "8px 12px",
+                      borderRadius: 999,
+                      border: "1px solid rgba(255,255,255,0.10)",
+                      background: "rgba(255,255,255,0.04)",
+                      fontSize: 12,
+                      color: "#d4d4d8",
+                    }}
+                  >
+                    {name}
+                  </span>
+                ))
+              ) : (
+                <span style={{ fontSize: 13, color: "#71717a" }}>No saved deck yet</span>
+              )}
             </div>
           </div>
 
