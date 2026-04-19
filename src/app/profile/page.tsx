@@ -1,61 +1,159 @@
 "use client";
 
-import PageShell from "@/components/PageShell";
-import { glassCard, secondaryButton } from "@/components/ui";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import PageShell from "@/components/PageShell";
+import { glassCard, primaryButton, secondaryButton } from "@/components/ui";
+import { getWalletCoins } from "@/lib/walletStorage";
+import { getOwnedCardsDetailed } from "@/lib/collectionStorage";
+import { loadDeck } from "@/lib/deckStorage";
 
 export default function ProfilePage() {
   const router = useRouter();
 
+  const [coins, setCoins] = useState(0);
+  const [ownedCount, setOwnedCount] = useState(0);
+  const [deckCount, setDeckCount] = useState(0);
+
+  useEffect(() => {
+    setCoins(getWalletCoins());
+    setOwnedCount(getOwnedCardsDetailed().length);
+    setDeckCount(loadDeck().length);
+  }, []);
+
   return (
     <PageShell>
-      <div style={{ marginBottom: 20, display: "flex", justifyContent: "space-between", gap: 12 }}>
-        <div>
-          <div style={{ fontSize: 32, fontWeight: 700 }}>Profile</div>
-          <div style={{ marginTop: 8, fontSize: 14, color: "#a1a1aa" }}>
-            Player identity, progression and stats
-          </div>
-        </div>
-
-        <button style={secondaryButton()} onClick={() => router.push("/")}>
-          Back
-        </button>
-      </div>
-
-      <div style={{ ...glassCard(), padding: 20 }}>
-        <div style={{ display: "flex", gap: 16, alignItems: "center" }}>
+      <div style={{ display: "grid", gap: 16 }}>
+        <div style={{ ...glassCard(), padding: 20 }}>
           <div
             style={{
-              width: 64,
-              height: 64,
-              borderRadius: 22,
-              background: "#ffffff",
-              color: "#000",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              fontWeight: 900,
-              fontSize: 22,
+              fontSize: 12,
+              letterSpacing: "0.14em",
+              textTransform: "uppercase",
+              color: "rgba(255,255,255,0.5)",
             }}
           >
-            BX
+            Fighter Profile
           </div>
 
-          <div>
-            <div style={{ fontSize: 20, fontWeight: 700 }}>Arena Player</div>
-            <div style={{ marginTop: 4, fontSize: 14, color: "#a1a1aa" }}>@telegram_user</div>
+          <div style={{ marginTop: 8, fontSize: 34, fontWeight: 900 }}>
+            Profile
+          </div>
+
+          <div
+            style={{
+              marginTop: 10,
+              color: "rgba(255,255,255,0.72)",
+              lineHeight: 1.5,
+            }}
+          >
+            Review your current game status, collection progress and system access.
           </div>
         </div>
 
-        <div style={{ marginTop: 18, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "1fr 1fr",
+            gap: 12,
+          }}
+        >
           <div style={{ ...glassCard(), padding: 16 }}>
-            <div style={{ fontSize: 13, color: "#a1a1aa" }}>Collection</div>
-            <div style={{ marginTop: 8, fontSize: 24, fontWeight: 700 }}>8 / 100</div>
+            <div style={{ fontSize: 13, color: "rgba(255,255,255,0.55)" }}>
+              Wallet
+            </div>
+            <div style={{ marginTop: 8, fontSize: 28, fontWeight: 900 }}>
+              {coins}
+            </div>
+            <div
+              style={{
+                marginTop: 6,
+                color: "rgba(255,255,255,0.68)",
+              }}
+            >
+              Coins available
+            </div>
           </div>
 
           <div style={{ ...glassCard(), padding: 16 }}>
-            <div style={{ fontSize: 13, color: "#a1a1aa" }}>Decks</div>
-            <div style={{ marginTop: 8, fontSize: 24, fontWeight: 700 }}>1</div>
+            <div style={{ fontSize: 13, color: "rgba(255,255,255,0.55)" }}>
+              Collection
+            </div>
+            <div style={{ marginTop: 8, fontSize: 28, fontWeight: 900 }}>
+              {ownedCount}
+            </div>
+            <div
+              style={{
+                marginTop: 6,
+                color: "rgba(255,255,255,0.68)",
+              }}
+            >
+              Owned fighters
+            </div>
+          </div>
+
+          <div style={{ ...glassCard(), padding: 16 }}>
+            <div style={{ fontSize: 13, color: "rgba(255,255,255,0.55)" }}>
+              Main Deck
+            </div>
+            <div style={{ marginTop: 8, fontSize: 28, fontWeight: 900 }}>
+              {deckCount}/5
+            </div>
+            <div
+              style={{
+                marginTop: 6,
+                color: "rgba(255,255,255,0.68)",
+              }}
+            >
+              Deck readiness
+            </div>
+          </div>
+
+          <div style={{ ...glassCard(), padding: 16 }}>
+            <div style={{ fontSize: 13, color: "rgba(255,255,255,0.55)" }}>
+              Status
+            </div>
+            <div style={{ marginTop: 8, fontSize: 20, fontWeight: 900 }}>
+              Active
+            </div>
+            <div
+              style={{
+                marginTop: 6,
+                color: "rgba(255,255,255,0.68)",
+              }}
+            >
+              Arena profile online
+            </div>
+          </div>
+        </div>
+
+        <div style={{ ...glassCard(), padding: 16 }}>
+          <div style={{ fontSize: 16, fontWeight: 800 }}>System Access</div>
+          <div
+            style={{
+              marginTop: 10,
+              color: "rgba(255,255,255,0.72)",
+              lineHeight: 1.5,
+            }}
+          >
+            Open the game settings hub to prepare future controls for audio,
+            visuals, gameplay and data tools.
+          </div>
+
+          <div
+            style={{
+              marginTop: 16,
+              display: "grid",
+              gridTemplateColumns: "1fr 1fr",
+              gap: 10,
+            }}
+          >
+            <button onClick={() => router.push("/settings")} style={primaryButton()}>
+              Open Settings
+            </button>
+            <button onClick={() => router.push("/")} style={secondaryButton()}>
+              Back Home
+            </button>
           </div>
         </div>
       </div>

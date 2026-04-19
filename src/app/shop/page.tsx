@@ -17,6 +17,7 @@ import {
   seedStarterCollection,
 } from "@/lib/collectionStorage";
 import { savePendingPackReveal } from "@/lib/packRevealStorage";
+import { playClickSfx } from "@/lib/sfx";
 import type { FighterCard } from "@/types/game";
 
 export default function ShopPage() {
@@ -71,6 +72,7 @@ export default function ShopPage() {
       return;
     }
 
+    playClickSfx();
     setIsOpening(true);
     setCoins(result.balance);
 
@@ -87,6 +89,7 @@ export default function ShopPage() {
       return;
     }
 
+    playClickSfx();
     setIsOpening(true);
     setCoins(result.balance);
 
@@ -217,7 +220,7 @@ export default function ShopPage() {
             Shop Status
           </div>
           <div style={{ color: "rgba(255,255,255,0.72)" }}>
-            {message || "Buy a pack to start the reveal animation."}
+            {message || "Buy a pack to launch the reveal sequence."}
           </div>
         </div>
       </div>

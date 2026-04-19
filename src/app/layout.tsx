@@ -1,10 +1,10 @@
 import type { Metadata } from "next";
-import Script from "next/script";
 import "./globals.css";
+import GlobalClickSound from "@/components/GlobalClickSound";
 
 export const metadata: Metadata = {
   title: "Baki X Kengan",
-  description: "Telegram Mini App",
+  description: "Collect fighter cards, build your deck, and dominate the arena.",
 };
 
 export default function RootLayout({
@@ -13,13 +13,10 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" suppressHydrationWarning>
-      <body suppressHydrationWarning>
+    <html lang="en">
+      <body>
+        <GlobalClickSound />
         {children}
-        <Script
-          src="https://telegram.org/js/telegram-web-app.js"
-          strategy="afterInteractive"
-        />
       </body>
     </html>
   );

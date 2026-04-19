@@ -3,7 +3,12 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import PageShell from "@/components/PageShell";
-import { glassCard, primaryButton, secondaryButton, rarityColors } from "@/components/ui";
+import {
+  glassCard,
+  primaryButton,
+  secondaryButton,
+  rarityColors,
+} from "@/components/ui";
 import { loadDeck } from "@/lib/deckStorage";
 import { saveBattleSetup } from "@/lib/battleStorage";
 import type { FighterCard } from "@/types/game";
@@ -18,6 +23,7 @@ const enemyPools: Record<BattleMode, number[]> = {
 
 export default function BattlePage() {
   const router = useRouter();
+
   const [mode, setMode] = useState<BattleMode>("Casual");
   const [deck, setDeck] = useState<FighterCard[]>([]);
   const [message, setMessage] = useState("");
@@ -48,219 +54,275 @@ export default function BattlePage() {
       enemyDeck: enemyTeam,
     });
 
-    router.push("/battle/result");
+    router.push("/battle/versus");
   }
 
   return (
     <PageShell>
-      <div style={{ marginBottom: 20 }}>
-        <div style={{ fontSize: 32, fontWeight: 700 }}>Battle Setup</div>
-        <div style={{ marginTop: 8, fontSize: 14, color: "#a1a1aa" }}>
-          Choose a mode, review your deck, and enter the arena
+      <div style={{ display: "grid", gap: 16 }}>
+        <div style={{ ...glassCard(), padding: 20 }}>
+          <div style={{ fontSize: 32, fontWeight: 900 }}>Battle Setup</div>
+          <div
+            style={{
+              marginTop: 8,
+              color: "rgba(255,255,255,0.72)",
+              lineHeight: 1.5,
+            }}
+          >
+            Choose a mode, review your deck, and enter the arena.
+          </div>
         </div>
-      </div>
 
-      <div style={{ ...glassCard(), padding: 20, marginBottom: 16 }}>
-        <div style={{ fontSize: 20, fontWeight: 700 }}>Mode Select</div>
-        <div style={{ marginTop: 8, fontSize: 14, color: "#a1a1aa" }}>
-          Pick how you want to fight
-        </div>
-
-        <div
-          style={{
-            marginTop: 16,
-            display: "grid",
-            gridTemplateColumns: "1fr 1fr 1fr",
-            gap: 10,
-          }}
-        >
-          {(["Ranked", "Casual", "Training"] as BattleMode[]).map((item) => {
-            const active = mode === item;
-
-            return (
-              <button
-                key={item}
-                onClick={() => {
-                  setMode(item);
-                  setMessage("");
-                }}
-                style={{
-                  padding: "14px 12px",
-                  borderRadius: 16,
-                  border: active
-                    ? "1px solid rgba(255,255,255,0.18)"
-                    : "1px solid rgba(255,255,255,0.08)",
-                  background: active ? "#ffffff" : "rgba(255,255,255,0.04)",
-                  color: active ? "#000000" : "#ffffff",
-                  fontWeight: 700,
-                  fontSize: 14,
-                  cursor: "pointer",
-                }}
-              >
-                {item}
-              </button>
-            );
-          })}
-        </div>
-      </div>
-
-      <div style={{ ...glassCard(), padding: 20, marginBottom: 16 }}>
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "space-between",
-            gap: 12,
-            alignItems: "center",
-          }}
-        >
-          <div>
-            <div style={{ fontSize: 20, fontWeight: 700 }}>Your Deck</div>
-            <div style={{ marginTop: 8, fontSize: 14, color: "#a1a1aa" }}>
-              Saved main arena deck
-            </div>
+        <div style={{ ...glassCard(), padding: 18 }}>
+          <div style={{ fontSize: 18, fontWeight: 800 }}>Mode Select</div>
+          <div
+            style={{
+              marginTop: 8,
+              color: "rgba(255,255,255,0.66)",
+            }}
+          >
+            Pick how you want to fight.
           </div>
 
           <div
             style={{
-              padding: "8px 12px",
-              borderRadius: 999,
-              border: "1px solid rgba(255,255,255,0.10)",
-              background: isDeckReady ? "rgba(34,197,94,0.12)" : "rgba(255,255,255,0.04)",
-              color: isDeckReady ? "#86efac" : "#d4d4d8",
-              fontSize: 12,
-              fontWeight: 700,
+              marginTop: 16,
+              display: "grid",
+              gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+              gap: 12,
             }}
           >
-            {deck.length}/5
+            {(["Ranked", "Casual", "Training"] as BattleMode[]).map((item) => {
+              const active = mode === item;
+
+              return (
+                <button
+                  key={item}
+                  onClick={() => {
+                    setMode(item);
+                    setMessage("");
+                  }}
+                  style={{
+                    padding: "14px 12px",
+                    borderRadius: 16,
+                    border: active
+                      ? "1px solid rgba(255,255,255,0.18)"
+                      : "1px solid rgba(255,255,255,0.08)",
+                    background: active ? "#ffffff" : "rgba(255,255,255,0.04)",
+                    color: active ? "#000000" : "#ffffff",
+                    fontWeight: 700,
+                    fontSize: 14,
+                    cursor: "pointer",
+                  }}
+                >
+                  {item}
+                </button>
+              );
+            })}
           </div>
         </div>
 
-        <div style={{ marginTop: 16, display: "grid", gap: 10 }}>
-          {deck.length > 0 ? (
-            deck.map((card, index) => {
+        <div style={{ ...glassCard(), padding: 18 }}>
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              gap: 12,
+              alignItems: "center",
+              flexWrap: "wrap",
+            }}
+          >
+            <div>
+              <div style={{ fontSize: 18, fontWeight: 800 }}>Your Deck</div>
+              <div
+                style={{
+                  marginTop: 8,
+                  color: "rgba(255,255,255,0.66)",
+                }}
+              >
+                Saved main arena deck.
+              </div>
+            </div>
+
+            <div
+              style={{
+                padding: "10px 14px",
+                borderRadius: 999,
+                border: `1px solid ${
+                  isDeckReady
+                    ? "rgba(34,197,94,0.35)"
+                    : "rgba(255,255,255,0.12)"
+                }`,
+                background: isDeckReady
+                  ? "rgba(34,197,94,0.18)"
+                  : "rgba(255,255,255,0.05)",
+                fontWeight: 800,
+                fontSize: 18,
+              }}
+            >
+              {deck.length}/5
+            </div>
+          </div>
+
+          <div style={{ display: "grid", gap: 12, marginTop: 16 }}>
+            {deck.length > 0 ? (
+              deck.map((card) => {
+                const tone = rarityColors(card.rarity);
+
+                return (
+                  <div
+                    key={card.id}
+                    style={{
+                      padding: 16,
+                      borderRadius: 18,
+                      border: `1px solid ${tone.border}`,
+                      background: tone.bg,
+                    }}
+                  >
+                    <div
+                      style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        gap: 12,
+                        alignItems: "center",
+                      }}
+                    >
+                      <div>
+                        <div style={{ fontSize: 18, fontWeight: 800 }}>
+                          {card.name}
+                        </div>
+                        <div
+                          style={{
+                            marginTop: 6,
+                            color: "rgba(255,255,255,0.72)",
+                          }}
+                        >
+                          {card.rarity} • {card.type} • {card.universe}
+                        </div>
+                      </div>
+
+                      <div style={{ fontWeight: 900, fontSize: 18 }}>
+                        {card.stars}★
+                      </div>
+                    </div>
+                  </div>
+                );
+              })
+            ) : (
+              <div
+                style={{
+                  padding: 16,
+                  borderRadius: 16,
+                  background: "rgba(255,255,255,0.04)",
+                  border: "1px solid rgba(255,255,255,0.08)",
+                  color: "rgba(255,255,255,0.72)",
+                }}
+              >
+                No saved deck found.
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div style={{ ...glassCard(), padding: 18 }}>
+          <div style={{ fontSize: 18, fontWeight: 800 }}>Enemy Preview</div>
+          <div
+            style={{
+              marginTop: 8,
+              color: "rgba(255,255,255,0.66)",
+            }}
+          >
+            Opponent lineup for {mode} mode.
+          </div>
+
+          <div style={{ display: "grid", gap: 12, marginTop: 16 }}>
+            {enemyTeam.map((card) => {
               const tone = rarityColors(card.rarity);
 
               return (
                 <div
-                  key={`player-${card.id}-${index}`}
+                  key={card.id}
                   style={{
-                    minHeight: 72,
+                    padding: 16,
                     borderRadius: 18,
                     border: `1px solid ${tone.border}`,
                     background: tone.bg,
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "space-between",
-                    gap: 12,
-                    padding: "12px 14px",
                   }}
                 >
-                  <div>
-                    <div style={{ fontSize: 16, fontWeight: 700 }}>{card.name}</div>
-                    <div style={{ marginTop: 4, fontSize: 12, color: "#d4d4d8" }}>
-                      {card.rarity} • {card.type} • {card.universe}
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      gap: 12,
+                      alignItems: "center",
+                    }}
+                  >
+                    <div>
+                      <div style={{ fontSize: 18, fontWeight: 800 }}>
+                        {card.name}
+                      </div>
+                      <div
+                        style={{
+                          marginTop: 6,
+                          color: "rgba(255,255,255,0.72)",
+                        }}
+                      >
+                        {card.rarity} • {card.type} • {card.universe}
+                      </div>
+                    </div>
+
+                    <div style={{ fontWeight: 900, fontSize: 18 }}>
+                      {card.stars}★
                     </div>
                   </div>
-
-                  <div style={{ fontSize: 12, color: tone.text }}>{card.stars}★</div>
                 </div>
               );
-            })
-          ) : (
-            <div
-              style={{
-                minHeight: 74,
-                borderRadius: 18,
-                border: "1px dashed rgba(255,255,255,0.14)",
-                background: "rgba(255,255,255,0.02)",
-                display: "flex",
-                alignItems: "center",
-                padding: "0 16px",
-                color: "#71717a",
-                fontSize: 14,
-              }}
-            >
-              No saved deck found.
-            </div>
-          )}
-        </div>
-      </div>
-
-      <div style={{ ...glassCard(), padding: 20, marginBottom: 16 }}>
-        <div style={{ fontSize: 20, fontWeight: 700 }}>Enemy Preview</div>
-        <div style={{ marginTop: 8, fontSize: 14, color: "#a1a1aa" }}>
-          Opponent lineup for {mode} mode
+            })}
+          </div>
         </div>
 
-        <div style={{ marginTop: 16, display: "grid", gap: 10 }}>
-          {enemyTeam.map((card, index) => {
-            const tone = rarityColors(card.rarity);
-
-            return (
-              <div
-                key={`enemy-${card.id}-${index}`}
-                style={{
-                  minHeight: 72,
-                  borderRadius: 18,
-                  border: `1px solid ${tone.border}`,
-                  background: tone.bg,
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "space-between",
-                  gap: 12,
-                  padding: "12px 14px",
-                }}
-              >
-                <div>
-                  <div style={{ fontSize: 16, fontWeight: 700 }}>{card.name}</div>
-                  <div style={{ marginTop: 4, fontSize: 12, color: "#d4d4d8" }}>
-                    {card.rarity} • {card.type} • {card.universe}
-                  </div>
-                </div>
-
-                <div style={{ fontSize: 12, color: tone.text }}>{card.stars}★</div>
-              </div>
-            );
-          })}
-        </div>
-      </div>
-
-      <div style={{ ...glassCard(), padding: 20 }}>
-        <div style={{ fontSize: 20, fontWeight: 700 }}>Ready Check</div>
-        <div style={{ marginTop: 8, fontSize: 14, color: "#a1a1aa" }}>
-          Enter the arena when your deck is complete
-        </div>
-
-        <div
-          style={{
-            marginTop: 16,
-            display: "grid",
-            gridTemplateColumns: "1fr 1fr",
-            gap: 12,
-          }}
-        >
-          <button style={primaryButton()} onClick={handleStartBattle}>
-            Start Battle
-          </button>
-
-          <button
-            style={secondaryButton()}
-            onClick={() => {
-              setMessage("");
+        <div style={{ ...glassCard(), padding: 18 }}>
+          <div style={{ fontSize: 18, fontWeight: 800 }}>Ready Check</div>
+          <div
+            style={{
+              marginTop: 8,
+              color: "rgba(255,255,255,0.66)",
             }}
           >
-            Reset
-          </button>
-        </div>
+            Enter the arena when your deck is complete.
+          </div>
 
-        <div
-          style={{
-            marginTop: 14,
-            fontSize: 13,
-            color: message ? "#fca5a5" : "#a1a1aa",
-          }}
-        >
-          {message || "Choose a mode and begin."}
+          <div
+            style={{
+              marginTop: 16,
+              display: "grid",
+              gridTemplateColumns: "1fr 1fr",
+              gap: 10,
+            }}
+          >
+            <button onClick={handleStartBattle} style={primaryButton()}>
+              Start Battle
+            </button>
+
+            <button
+              onClick={() => {
+                setMode("Casual");
+                setMessage("");
+              }}
+              style={secondaryButton()}
+            >
+              Reset
+            </button>
+          </div>
+
+          <div
+            style={{
+              marginTop: 12,
+              color: message ? "#fca5a5" : "rgba(255,255,255,0.68)",
+            }}
+          >
+            {message || "Choose a mode and begin."}
+          </div>
         </div>
       </div>
     </PageShell>
