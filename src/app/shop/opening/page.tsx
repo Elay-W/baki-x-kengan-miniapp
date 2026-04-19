@@ -26,7 +26,7 @@ function getPackLabel(source: PendingPackReveal["source"]) {
 }
 
 function isTopTierRarity(rarity: string) {
-  return ["Elite", "Legendary", "God-like", "Divine"].includes(rarity);
+  return ["Elite", "Legendary"].includes(rarity);
 }
 
 function getRevealTimings(reveal: PendingPackReveal) {
@@ -49,10 +49,6 @@ function getRevealTimings(reveal: PendingPackReveal) {
 function getAuraBackground(reveal: PendingPackReveal) {
   const rarity = reveal.card.rarity;
 
-  if (rarity === "God-like" || rarity === "Divine") {
-    return "radial-gradient(circle, rgba(239,68,68,0.34), rgba(127,29,29,0.08) 68%, transparent 72%)";
-  }
-
   if (rarity === "Legendary") {
     return "radial-gradient(circle, rgba(251,146,60,0.34), rgba(120,53,15,0.08) 68%, transparent 72%)";
   }
@@ -68,10 +64,6 @@ function getAuraBackground(reveal: PendingPackReveal) {
 
 function getPackGradient(reveal: PendingPackReveal) {
   const rarity = reveal.card.rarity;
-
-  if (rarity === "God-like" || rarity === "Divine") {
-    return "linear-gradient(180deg, rgba(127,29,29,0.45), rgba(17,17,17,0.96))";
-  }
 
   if (rarity === "Legendary") {
     return "linear-gradient(180deg, rgba(180,83,9,0.42), rgba(17,17,17,0.96))";
@@ -285,10 +277,10 @@ export default function PackOpeningPage() {
                       const delay = (index % 7) * 0.12;
 
                       const color =
-                        card.rarity === "God-like" || card.rarity === "Divine"
-                          ? "rgba(255,80,80,0.9)"
-                          : card.rarity === "Legendary"
-                            ? "rgba(255,180,80,0.88)"
+                        card.rarity === "Legendary"
+                          ? "rgba(255,180,80,0.88)"
+                          : card.rarity === "Elite"
+                            ? "rgba(255,220,100,0.86)"
                             : reveal.source === "elite"
                               ? "rgba(255,150,80,0.86)"
                               : "rgba(120,180,255,0.85)";
@@ -369,10 +361,10 @@ export default function PackOpeningPage() {
                     height: premiumReveal ? 460 : 380,
                     borderRadius: 999,
                     border:
-                      card.rarity === "God-like" || card.rarity === "Divine"
-                        ? "2px solid rgba(255,90,90,0.65)"
-                        : card.rarity === "Legendary"
-                          ? "2px solid rgba(255,180,90,0.6)"
+                      card.rarity === "Legendary"
+                        ? "2px solid rgba(255,180,90,0.6)"
+                        : card.rarity === "Elite"
+                          ? "2px solid rgba(255,220,120,0.5)"
                           : "2px solid rgba(255,255,255,0.28)",
                     pointerEvents: "none",
                   }}
