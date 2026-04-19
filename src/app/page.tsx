@@ -6,11 +6,15 @@ import SplashScreen from "@/components/SplashScreen";
 import { glassCard, secondaryButton } from "@/components/ui";
 import { useRouter } from "next/navigation";
 import { loadDeck } from "@/lib/deckStorage";
+import { getWalletCoins } from "@/lib/walletStorage";
+import { getOwnedCardsDetailed, seedStarterCollection } from "@/lib/collectionStorage";
 
 export default function HomePage() {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [progress, setProgress] = useState(8);
+  const [coins, setCoins] = useState(500);
+  const [ownedCount, setOwnedCount] = useState(0);
   const [activeDeck, setActiveDeck] = useState<string[]>([
     "Yujiro Hanma",
     "Baki Hanma",
@@ -18,6 +22,8 @@ export default function HomePage() {
   ]);
 
   useEffect(() => {
+    seedStarterCollection();
+
     const interval = setInterval(() => {
       setProgress((prev) => (prev >= 100 ? 100 : Math.min(prev + 7, 100)));
     }, 120);
@@ -38,6 +44,9 @@ export default function HomePage() {
     if (storedDeck.length > 0) {
       setActiveDeck(storedDeck.map((card) => card.name));
     }
+
+    setCoins(getWalletCoins());
+    setOwnedCount(getOwnedCardsDetailed().length);
   }, []);
 
   return (
@@ -46,24 +55,61 @@ export default function HomePage() {
 
       {!loading && (
         <PageShell>
-          <div style={{ marginBottom: 20, display: "flex", justifyContent: "space-between", gap: 12 }}>
+          <div
+            style={{
+              marginBottom: 20,
+              display: "flex",
+              justifyContent: "space-between",
+              gap: 12,
+              alignItems: "flex-start",
+            }}
+          >
             <div>
-              <div style={{ fontSize: 34, fontWeight: 700, lineHeight: 1.05 }}>Baki X Kengan</div>
-              <div style={{ marginTop: 10, fontSize: 16, color: "#a1a1aa", lineHeight: 1.5 }}>
+              <div style={{ fontSize: 34, fontWeight: 700, lineHeight: 1.05 }}>
+                Baki X Kengan
+              </div>
+              <div
+                style={{
+                  marginTop: 10,
+                  fontSize: 16,
+                  color: "#a1a1aa",
+                  lineHeight: 1.5,
+                }}
+              >
                 Collect fighter cards, build your deck, and dominate the arena.
               </div>
             </div>
 
-            <button style={secondaryButton()} onClick={() => router.push("/profile")}>
-              Profile
-            </button>
+            <div style={{ display: "grid", gap: 10 }}>
+              <div
+                style={{
+                  padding: "12px 14px",
+                  borderRadius: 18,
+                  border: "1px solid rgba(255,255,255,0.10)",
+                  background: "rgba(255,255,255,0.04)",
+                  color: "#fef08a",
+                  fontWeight: 700,
+                  fontSize: 14,
+                  textAlign: "center",
+                  minWidth: 110,
+                }}
+              >
+                {coins} Coins
+              </div>
+
+              <button style={secondaryButton()} onClick={() => router.push("/profile")}>
+                Profile
+              </button>
+            </div>
           </div>
 
           <div style={{ ...glassCard(), padding: 20, marginBottom: 16 }}>
             <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
               <div>
                 <div style={{ fontSize: 13, color: "#a1a1aa" }}>Current deck</div>
-                <div style={{ marginTop: 6, fontSize: 28, fontWeight: 700 }}>Main Arena Deck</div>
+                <div style={{ marginTop: 6, fontSize: 28, fontWeight: 700 }}>
+                  Main Arena Deck
+                </div>
               </div>
 
               <button style={secondaryButton()} onClick={() => router.push("/deck")}>
@@ -96,7 +142,7 @@ export default function HomePage() {
 
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
             {[
-              ["Collection", "Browse your fighters and rarities", "/collection"],
+              ["Collection", `Owned fighters: ${ownedCount}`, "/collection"],
               ["Decks", "Manage your battle-ready builds", "/deck"],
               ["Battle", "Choose a mode and enter the arena", "/battle"],
               ["Shop", "Open packs and get new cards", "/shop"],
@@ -112,7 +158,14 @@ export default function HomePage() {
                 }}
               >
                 <div style={{ fontSize: 18, fontWeight: 700 }}>{title}</div>
-                <div style={{ marginTop: 8, fontSize: 14, color: "#a1a1aa", lineHeight: 1.45 }}>
+                <div
+                  style={{
+                    marginTop: 8,
+                    fontSize: 14,
+                    color: "#a1a1aa",
+                    lineHeight: 1.45,
+                  }}
+                >
                   {subtitle}
                 </div>
               </button>
