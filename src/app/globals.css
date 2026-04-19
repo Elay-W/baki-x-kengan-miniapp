@@ -13,3 +13,416 @@ body {
 * {
   box-sizing: border-box;
 }
+
+.pack-opening-shell {
+  position: relative;
+  display: grid;
+  gap: 18px;
+  min-height: 584px;
+}
+
+.pack-opening-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.pack-opening-kicker {
+  font-size: 12px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.pack-opening-title {
+  margin-top: 6px;
+  font-size: 30px;
+  line-height: 1;
+  font-weight: 900;
+}
+
+.pack-opening-subtle {
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.58);
+}
+
+.pack-opening-stage {
+  position: relative;
+  min-height: 500px;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  border-radius: 26px;
+  background:
+    radial-gradient(circle at center, rgba(255, 255, 255, 0.06), transparent 42%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.02), rgba(255, 255, 255, 0));
+}
+
+.pack-aura {
+  position: absolute;
+  width: 320px;
+  height: 320px;
+  border-radius: 999px;
+  filter: blur(20px);
+  opacity: 0.9;
+  animation: auraPulse 1.8s ease-in-out infinite;
+}
+
+.pack-aura-standard {
+  background: radial-gradient(circle, rgba(96, 165, 250, 0.24), rgba(30, 58, 138, 0.05) 70%, transparent 72%);
+}
+
+.pack-aura-elite {
+  background: radial-gradient(circle, rgba(251, 146, 60, 0.28), rgba(127, 29, 29, 0.08) 70%, transparent 72%);
+}
+
+.pack-aura-revealed {
+  width: 420px;
+  height: 420px;
+  opacity: 1;
+  animation-duration: 2.2s;
+}
+
+.pack-case {
+  position: relative;
+  width: min(78vw, 280px);
+  height: min(108vw, 380px);
+  border-radius: 28px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  overflow: hidden;
+  box-shadow:
+    0 24px 80px rgba(0, 0, 0, 0.48),
+    inset 0 1px 0 rgba(255, 255, 255, 0.12);
+}
+
+.pack-case::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.12), transparent 22%, transparent 70%, rgba(255, 255, 255, 0.08)),
+    radial-gradient(circle at top, rgba(255, 255, 255, 0.18), transparent 45%);
+}
+
+.pack-case-charging {
+  animation:
+    packFloat 2.2s ease-in-out infinite,
+    packShake 0.22s linear infinite;
+}
+
+.pack-case-flash {
+  animation:
+    packImpact 0.32s ease-out forwards,
+    packExplodeGlow 0.4s ease-out forwards;
+}
+
+.pack-case-topline {
+  position: absolute;
+  top: 18px;
+  left: 18px;
+  right: 18px;
+  height: 1px;
+  background: rgba(255, 255, 255, 0.2);
+}
+
+.pack-case-symbol {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  font-size: 94px;
+  font-weight: 900;
+  color: rgba(255, 255, 255, 0.14);
+  transform: translateY(-12px);
+}
+
+.pack-case-name {
+  position: absolute;
+  left: 24px;
+  right: 24px;
+  bottom: 28px;
+  font-size: 14px;
+  font-weight: 900;
+  letter-spacing: 0.22em;
+  text-align: center;
+  color: rgba(255, 255, 255, 0.88);
+}
+
+.pack-case-glowline {
+  position: absolute;
+  left: 50%;
+  top: 58px;
+  bottom: 58px;
+  width: 1px;
+  transform: translateX(-50%);
+  background: linear-gradient(
+    180deg,
+    transparent,
+    rgba(255, 255, 255, 0.32),
+    transparent
+  );
+  opacity: 0.7;
+}
+
+.pack-crack {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 6px;
+  height: 0;
+  transform: translate(-50%, -50%);
+  border-radius: 999px;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0), rgba(255,255,255,0.96), rgba(255,255,255,0));
+  box-shadow:
+    0 0 20px rgba(255,255,255,0.95),
+    0 0 60px rgba(255,255,255,0.55);
+  opacity: 0;
+}
+
+.pack-crack-live {
+  animation: crackOpen 0.42s ease-out forwards;
+}
+
+.pack-flash {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(circle at center, rgba(255,255,255,0.95), rgba(255,255,255,0.08) 35%, transparent 62%);
+  opacity: 0;
+  pointer-events: none;
+}
+
+.pack-flash-live {
+  animation: revealFlash 0.34s ease-out forwards;
+}
+
+.pack-particles {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.pack-particle {
+  position: absolute;
+  left: 50%;
+  top: 54%;
+  width: var(--size);
+  height: var(--size);
+  margin-left: calc(var(--x) * 1);
+  border-radius: 999px;
+  background: rgba(255, 184, 108, 0.9);
+  filter: blur(0.4px);
+  opacity: 0;
+  animation: emberFloat 2s linear infinite;
+  animation-delay: var(--delay);
+}
+
+.revealed-card-wrap {
+  position: relative;
+  width: min(86vw, 360px);
+  padding: 18px;
+  border-radius: 28px;
+  border: 1px solid;
+  box-shadow:
+    0 26px 90px rgba(0, 0, 0, 0.48),
+    0 0 50px color-mix(in srgb, var(--reveal-text) 20%, transparent);
+  animation: revealRise 0.55s ease-out both;
+  overflow: hidden;
+}
+
+.revealed-card-wrap::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(135deg, rgba(255,255,255,0.16), transparent 26%, transparent 74%, rgba(255,255,255,0.08)),
+    radial-gradient(circle at top, rgba(255,255,255,0.13), transparent 36%);
+  pointer-events: none;
+}
+
+.revealed-card-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.revealed-card-universe {
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.revealed-card-stars {
+  font-size: 14px;
+  font-weight: 800;
+  color: rgba(255,255,255,0.86);
+}
+
+.revealed-card-main {
+  margin-top: 14px;
+}
+
+.revealed-card-name {
+  font-size: 28px;
+  line-height: 1;
+  font-weight: 900;
+}
+
+.revealed-card-title {
+  margin-top: 8px;
+  color: rgba(255,255,255,0.74);
+  line-height: 1.4;
+}
+
+.revealed-card-meta {
+  margin-top: 16px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 700;
+  color: rgba(255,255,255,0.82);
+  flex-wrap: wrap;
+}
+
+.revealed-card-skill {
+  margin-top: 14px;
+  padding: 12px 14px;
+  border-radius: 16px;
+  background: rgba(255,255,255,0.05);
+  border: 1px solid rgba(255,255,255,0.08);
+  color: rgba(255,255,255,0.84);
+  line-height: 1.45;
+  font-size: 14px;
+}
+
+.revealed-card-stats {
+  margin-top: 14px;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.rarity-godlike .pack-opening-title,
+.rarity-godlike .pack-opening-kicker {
+  text-shadow: 0 0 18px rgba(239, 68, 68, 0.32);
+}
+
+.rarity-legendary .pack-opening-title,
+.rarity-legendary .pack-opening-kicker {
+  text-shadow: 0 0 18px rgba(251, 146, 60, 0.28);
+}
+
+@keyframes auraPulse {
+  0%,
+  100% {
+    transform: scale(0.92);
+    opacity: 0.72;
+  }
+  50% {
+    transform: scale(1.08);
+    opacity: 1;
+  }
+}
+
+@keyframes packFloat {
+  0%,
+  100% {
+    transform: translateY(0px);
+  }
+  50% {
+    transform: translateY(-10px);
+  }
+}
+
+@keyframes packShake {
+  0% { transform: translateX(0) rotate(0deg); }
+  25% { transform: translateX(-1.5px) rotate(-0.5deg); }
+  50% { transform: translateX(1.5px) rotate(0.5deg); }
+  75% { transform: translateX(-1px) rotate(-0.25deg); }
+  100% { transform: translateX(0) rotate(0deg); }
+}
+
+@keyframes packImpact {
+  0% {
+    transform: scale(1);
+  }
+  55% {
+    transform: scale(1.08);
+  }
+  100% {
+    transform: scale(0.94);
+    opacity: 0;
+  }
+}
+
+@keyframes packExplodeGlow {
+  0% {
+    box-shadow:
+      0 24px 80px rgba(0, 0, 0, 0.48),
+      inset 0 1px 0 rgba(255, 255, 255, 0.12);
+  }
+  100% {
+    box-shadow:
+      0 0 140px rgba(255, 255, 255, 0.55),
+      0 0 260px rgba(255, 255, 255, 0.2);
+  }
+}
+
+@keyframes crackOpen {
+  0% {
+    height: 0;
+    opacity: 0;
+  }
+  30% {
+    opacity: 1;
+  }
+  100% {
+    height: 88%;
+    opacity: 1;
+  }
+}
+
+@keyframes revealFlash {
+  0% {
+    opacity: 0;
+  }
+  28% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes emberFloat {
+  0% {
+    transform: translateY(12px) scale(0.7);
+    opacity: 0;
+  }
+  15% {
+    opacity: 1;
+  }
+  100% {
+    transform: translateY(-220px) scale(1.1);
+    opacity: 0;
+  }
+}
+
+@keyframes revealRise {
+  0% {
+    opacity: 0;
+    transform: translateY(30px) scale(0.9);
+  }
+  60% {
+    opacity: 1;
+    transform: translateY(-4px) scale(1.02);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
