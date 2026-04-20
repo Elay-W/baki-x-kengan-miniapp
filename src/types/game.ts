@@ -1,6 +1,16 @@
 export type ScreenRoute = "home" | "collection" | "deck" | "battle" | "shop" | "profile";
 
-export type CardType =
+export type Rarity =
+  | "Common"
+  | "Uncommon"
+  | "Rare"
+  | "Epic"
+  | "Elite"
+  | "Legendary"
+  | "God-like"
+  | "Divine";
+
+export type FighterType =
   | "Powerhouse"
   | "Tank"
   | "Speedster"
@@ -9,24 +19,14 @@ export type CardType =
 
 export type Universe = "Baki" | "Kengan";
 
-export type Rarity =
-  | "Common"
-  | "Uncommon"
-  | "Rare"
-  | "Epic"
-  | "Elite"
-  | "Legendary"
-  | "God-like";
-
 export type FighterCard = {
   id: number;
   name: string;
   title: string;
-  universe: Universe;
   rarity: Rarity;
   stars: number;
-  type: CardType;
-  skill: string;
+  universe: Universe;
+  type: FighterType;
   stats: {
     STR: number;
     SPD: number;
@@ -35,4 +35,7 @@ export type FighterCard = {
     DEF: number;
     INSTINCT: number;
   };
+  skill: string;
+  copies?: number;
+  abilityKey?: string;
 };

@@ -2,15 +2,16 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { motion, AnimatePresence } from "motion/react";
+import { AnimatePresence, motion } from "motion/react";
 import PageShell from "@/components/PageShell";
 import { glassCard, primaryButton, rarityColors } from "@/components/ui";
 import {
   loadBattleSetup,
-  saveBattleResult,
   loadBattleResult,
+  saveBattleResult,
 } from "@/lib/battleStorage";
 import { simulateBattle, type BattleResultData } from "@/lib/battleMock";
+import type { BattleTimelineEvent } from "@/lib/battleTypes";
 import type { FighterCard } from "@/types/game";
 
 function totalStars(deck: FighterCard[]) {
@@ -216,11 +217,136 @@ function SupportSlot({
   );
 }
 
+function PreviewEventCard({
+  event,
+  index,
+}: {
+  event: BattleTimelineEvent;
+  index: number;
+}) {
+  const isKo = event.type === "ko";
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 18, scale: 0.98 }}
+      animate={{ opacity: 1, y: 0, scale: 1 }}
+      transition={{
+        duration: 0.28,
+        delay: 0.12 + index * 0.07,
+        ease: "easeOut",
+      }}
+      style={{
+        padding: 14,
+        borderRadius: 18,
+        border: "1px solid rgba(255,255,255,0.08)",
+        background: "rgba(255,255,255,0.04)",
+      }}
+    >
+      {isKo ? (
+        <>
+          <div
+            style={{
+              fontSize: 11,
+              fontWeight: 800,
+              letterSpacing: "0.12em",
+              textTransform: "uppercase",
+              color: "#fca5a5",
+            }}
+          >
+            KO Event
+          </div>
+
+          <div style={{ marginTop: 8, fontSize: 18, fontWeight: 900 }}>
+            {event.payload.name}
+          </div>
+
+          <div
+            style={{
+              marginTop: 6,
+              color: "rgba(255,255,255,0.74)",
+              lineHeight: 1.45,
+            }}
+          >
+            Defeated by {event.payload.defeatedBy} in round {event.payload.round}.
+          </div>
+        </>
+      ) : (
+        <>
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              gap: 8,
+              alignItems: "center",
+              flexWrap: "wrap",
+            }}
+          >
+            <div
+              style={{
+                fontSize: 11,
+                fontWeight: 800,
+                letterSpacing: "0.12em",
+                textTransform: "uppercase",
+                color: "rgba(255,255,255,0.6)",
+              }}
+            >
+              Round {event.payload.round} • Exchange {event.payload.exchange}
+            </div>
+
+            <div
+              style={{
+                padding: "5px 8px",
+                borderRadius: 999,
+                border: "1px solid rgba(255,255,255,0.08)",
+                background: "rgba(0,0,0,0.18)",
+                fontSize: 11,
+                fontWeight: 800,
+              }}
+            >
+              {event.payload.winner === "draw"
+                ? "Draw"
+                : event.payload.winner === "player"
+                  ? "Player edge"
+                  : "Enemy edge"}
+            </div>
+          </div>
+
+          <div style={{ marginTop: 8, fontSize: 16, fontWeight: 800 }}>
+            {event.payload.attackerName} vs {event.payload.defenderName}
+          </div>
+
+          <div
+            style={{
+              marginTop: 6,
+              color: "rgba(255,255,255,0.74)",
+              lineHeight: 1.45,
+            }}
+          >
+            {event.payload.resultText}
+          </div>
+
+          {event.payload.triggeredAbility && (
+            <div
+              style={{
+                marginTop: 8,
+                fontSize: 12,
+                color: "#fef08a",
+              }}
+            >
+              Ability: {event.payload.triggeredAbility}
+            </div>
+          )}
+        </>
+      )}
+    </motion.div>
+  );
+}
+
 export default function BattleVersusPage() {
   const router = useRouter();
 
-  const [result, setResult] = useState<BattleResultData | null>(null);
-  const [countdown, setCountdown] = useState(3);
+  const [result, setResult] = useState<BattleResultData<FighterCard> | null>(null);
+  const [countdown, setCountdown] = useState(4);
 
   useEffect(() => {
     const setup = loadBattleSetup();
@@ -251,7 +377,7 @@ export default function BattleVersusPage() {
 
     const timer = window.setTimeout(() => {
       setCountdown((prev) => prev - 1);
-    }, 900);
+    }, 950);
 
     return () => window.clearTimeout(timer);
   }, [countdown, result, router]);
@@ -276,6 +402,24 @@ export default function BattleVersusPage() {
       avgTECH: averageStat(result.enemyDeck, "TECH"),
       avgINSTINCT: averageStat(result.enemyDeck, "INSTINCT"),
     };
+  }, [result]);
+
+  const previewEvents = useMemo(() => {
+    if (!result) return [];
+
+    const exchangeEvents = result.timeline.filter(
+      (event) => event.type === "exchange"
+    );
+    const koEvents = result.timeline.filter((event) => event.type === "ko");
+
+    const selected: BattleTimelineEvent[] = [];
+
+    if (exchangeEvents[0]) selected.push(exchangeEvents[0]);
+    if (exchangeEvents[1]) selected.push(exchangeEvents[1]);
+    if (koEvents[0]) selected.push(koEvents[0]);
+    if (exchangeEvents.length > 2) selected.push(exchangeEvents[exchangeEvents.length - 1]);
+
+    return selected.slice(0, 4);
   }, [result]);
 
   if (!result || !playerStats || !enemyStats) {
@@ -346,7 +490,7 @@ export default function BattleVersusPage() {
                     lineHeight: 1.45,
                   }}
                 >
-                  Main fighters step into the arena first.
+                  Main fighters enter first. The opening exchanges are already unfolding.
                 </div>
               </div>
 
@@ -358,12 +502,7 @@ export default function BattleVersusPage() {
               </button>
             </div>
 
-            <div
-              style={{
-                display: "grid",
-                gap: 12,
-              }}
-            >
+            <div style={{ display: "grid", gap: 12 }}>
               <div
                 style={{
                   fontSize: 12,
@@ -437,6 +576,29 @@ export default function BattleVersusPage() {
                 </div>
 
                 <MainFighterCard card={enemyLead} side="enemy" />
+              </div>
+            </div>
+
+            <div style={{ display: "grid", gap: 16 }}>
+              <div
+                style={{
+                  fontSize: 12,
+                  letterSpacing: "0.14em",
+                  textTransform: "uppercase",
+                  color: "rgba(255,255,255,0.5)",
+                }}
+              >
+                Exchange Preview
+              </div>
+
+              <div style={{ display: "grid", gap: 10 }}>
+                {previewEvents.map((event, index) => (
+                  <PreviewEventCard
+                    key={`${event.type}-${index}`}
+                    event={event}
+                    index={index}
+                  />
+                ))}
               </div>
             </div>
 
