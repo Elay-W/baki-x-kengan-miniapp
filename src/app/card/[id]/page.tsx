@@ -1,5 +1,6 @@
 "use client";
-
+import StatBar from "@/components/StatBar";
+import FighterVisualCard from "@/components/FighterVisualCard";
 import { useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import PageShell from "@/components/PageShell";
@@ -136,6 +137,47 @@ export default function CardDetailsPage() {
   return (
     <PageShell>
       <div style={{ display: "grid", gap: 16 }}>
+       <FighterVisualCard
+  card={safeCard}
+  label={safeCard.universe}
+  compact={false}
+  imageSrc={`/fighters/${safeCard.id}.png`}
+  actionSlot={
+    <div
+      style={{
+        display: "flex",
+        gap: 8,
+        flexWrap: "wrap",
+      }}
+    >
+      <div
+        style={{
+          padding: "7px 10px",
+          borderRadius: 999,
+          background: "rgba(255,255,255,0.05)",
+          border: "1px solid rgba(255,255,255,0.08)",
+          fontSize: 12,
+          fontWeight: 800,
+        }}
+      >
+        {owned ? "Owned" : "Not owned"}
+      </div>
+
+      <div
+        style={{
+          padding: "7px 10px",
+          borderRadius: 999,
+          background: "rgba(255,255,255,0.05)",
+          border: "1px solid rgba(255,255,255,0.08)",
+          fontSize: 12,
+          fontWeight: 800,
+        }}
+      >
+        {inDeck ? "In deck" : "Not in deck"}
+      </div>
+    </div>
+  }
+/>
         <div
           style={{
             ...glassCard(),
@@ -280,20 +322,18 @@ export default function CardDetailsPage() {
           <div style={{ fontSize: 18, fontWeight: 800 }}>Stats</div>
 
           <div
-            style={{
-              marginTop: 14,
-              display: "grid",
-              gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
-              gap: 10,
-            }}
-          >
-            <StatPill label="STR" value={safeCard.stats.STR} />
-            <StatPill label="SPD" value={safeCard.stats.SPD} />
-            <StatPill label="TECH" value={safeCard.stats.TECH} />
-            <StatPill label="DUR" value={safeCard.stats.DUR} />
-            <StatPill label="DEF" value={safeCard.stats.DEF} />
-            <StatPill label="INSTINCT" value={safeCard.stats.INSTINCT} />
-          </div>
+  style={{
+    display: "grid",
+    gap: 10,
+  }}
+>
+  <StatBar label="STR" value={safeCard.stats.STR} />
+  <StatBar label="SPD" value={safeCard.stats.SPD} />
+  <StatBar label="TECH" value={safeCard.stats.TECH} />
+  <StatBar label="DEF" value={safeCard.stats.DEF} />
+  <StatBar label="DUR" value={safeCard.stats.DUR} />
+  <StatBar label="INSTINCT" value={safeCard.stats.INSTINCT} />
+</div>
         </div>
 
         <div style={{ ...glassCard(), padding: 18 }}>

@@ -1,5 +1,5 @@
 "use client";
-
+import FighterVisualCard from "@/components/FighterVisualCard";
 import { useEffect, useMemo, useState } from "react";
 import PageShell from "@/components/PageShell";
 import { rarityOrder } from "@/data/cards";
@@ -140,98 +140,16 @@ export default function CollectionPage() {
             const tone = rarityColors(card.rarity);
 
             return (
-              <button
-                key={card.id}
-                onClick={() => router.push(`/card/${card.id}`)}
-                style={{
-                  padding: 16,
-                  textAlign: "left",
-                  cursor: "pointer",
-                  borderRadius: 24,
-                  border: `1px solid ${tone.border}`,
-                  background: tone.bg,
-                  color: "#fff",
-                }}
-              >
-                <div
-                  style={{
-                    display: "flex",
-                    justifyContent: "space-between",
-                    gap: 8,
-                    alignItems: "center",
-                  }}
-                >
-                  <div
-                    style={{
-                      fontSize: 12,
-                      fontWeight: 800,
-                      letterSpacing: "0.12em",
-                      textTransform: "uppercase",
-                    }}
-                  >
-                    {card.universe}
-                  </div>
-
-                  <div
-                    style={{
-                      padding: "6px 10px",
-                      borderRadius: 999,
-                      border: "1px solid rgba(255,255,255,0.08)",
-                      background: "rgba(0,0,0,0.16)",
-                      fontSize: 12,
-                      fontWeight: 800,
-                    }}
-                  >
-                    x{card.copies}
-                  </div>
-                </div>
-
-                <div
-                  style={{
-                    marginTop: 12,
-                    fontSize: 18,
-                    fontWeight: 900,
-                    lineHeight: 1.15,
-                  }}
-                >
-                  {card.name}
-                </div>
-
-                <div
-                  style={{
-                    marginTop: 8,
-                    color: "rgba(255,255,255,0.72)",
-                    lineHeight: 1.4,
-                  }}
-                >
-                  {card.title}
-                </div>
-
-                <div
-                  style={{
-                    marginTop: 14,
-                    display: "flex",
-                    justifyContent: "space-between",
-                    gap: 10,
-                    alignItems: "center",
-                    color: "rgba(255,255,255,0.82)",
-                  }}
-                >
-                  <span>{card.rarity}</span>
-                  <span>{card.stars}★</span>
-                </div>
-
-                <div
-                  style={{
-                    marginTop: 14,
-                    color: "rgba(255,255,255,0.78)",
-                    fontSize: 14,
-                  }}
-                >
-                  {card.type}
-                </div>
-              </button>
-            );
+  <FighterVisualCard
+    key={card.id}
+    card={card}
+    copies={card.copies}
+    label={card.universe}
+    compact
+    imageSrc={`/fighters/${card.id}.png`}
+    onOpenDetails={() => router.push(`/card/${card.id}`)}
+  />
+);
           })}
         </div>
 

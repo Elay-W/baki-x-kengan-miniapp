@@ -1,5 +1,6 @@
 "use client";
-
+import { useRouter } from "next/navigation";
+import FighterVisualCard from "@/components/FighterVisualCard";
 import { useEffect, useMemo, useState } from "react";
 import PageShell from "@/components/PageShell";
 import {
@@ -24,6 +25,7 @@ const DECK_SIZE = 5;
 type OwnedCard = ReturnType<typeof getOwnedCardsDetailed>[number];
 
 export default function DeckPage() {
+  const router = useRouter();
   const [deck, setDeck] = useState<FighterCard[]>([]);
   const [ownedCards, setOwnedCards] = useState<OwnedCard[]>([]);
   const [query, setQuery] = useState("");
@@ -158,47 +160,24 @@ export default function DeckPage() {
               const tone = rarityColors(card.rarity);
 
               return (
-                <div
-                  key={card.id}
-                  style={{
-                    padding: 16,
-                    borderRadius: 18,
-                    border: `1px solid ${tone.border}`,
-                    background: tone.bg,
-                  }}
-                >
-                  <div
-                    style={{
-                      display: "flex",
-                      justifyContent: "space-between",
-                      gap: 12,
-                      alignItems: "center",
-                    }}
-                  >
-                    <div>
-                      <div style={{ fontSize: 18, fontWeight: 800 }}>
-                        {card.name}
-                      </div>
-                      <div
-                        style={{
-                          marginTop: 6,
-                          color: "rgba(255,255,255,0.72)",
-                          lineHeight: 1.4,
-                        }}
-                      >
-                        {card.rarity} • {card.type} • {card.universe}
-                      </div>
-                    </div>
-
-                    <button
-                      onClick={() => removeFromDeck(card.id)}
-                      style={secondaryButton()}
-                    >
-                      Remove
-                    </button>
-                  </div>
-                </div>
-              );
+  <FighterVisualCard
+    key={card.id}
+    card={card}
+    label={`Slot ${index + 1}`}
+    compact
+    imageSrc={`/fighters/${card.id}.png`}
+    onOpenDetails={() => router.push(`/card/${card.id}`)}
+    actionSlot={
+      <button
+        type="button"
+        onClick={() => removeFromDeck(card.id)}
+        style={secondaryButton()}
+      >
+        Remove
+      </button>
+    }
+  />
+);
             })}
           </div>
 
@@ -267,68 +246,28 @@ export default function DeckPage() {
               const tone = rarityColors(card.rarity);
 
               return (
-                <button
-                  key={card.id}
-                  onClick={() => addToDeck(card)}
-                  disabled={exists || full}
-                  style={{
-                    textAlign: "left",
-                    padding: "14px 16px",
-                    borderRadius: 18,
-                    border: `1px solid ${tone.border}`,
-                    background: tone.bg,
-                    color: "#fff",
-                    cursor: exists || full ? "not-allowed" : "pointer",
-                    opacity: exists ? 0.55 : 1,
-                  }}
-                >
-                  <div
-                    style={{
-                      display: "flex",
-                      justifyContent: "space-between",
-                      gap: 12,
-                      alignItems: "start",
-                    }}
-                  >
-                    <div>
-                      <div style={{ fontSize: 18, fontWeight: 800 }}>
-                        {card.name}
-                      </div>
-                      <div
-                        style={{
-                          marginTop: 6,
-                          color: "rgba(255,255,255,0.72)",
-                        }}
-                      >
-                        {card.title}
-                      </div>
-                    </div>
-
-                    <div
-                      style={{
-                        padding: "6px 10px",
-                        borderRadius: 999,
-                        border: "1px solid rgba(255,255,255,0.08)",
-                        background: "rgba(0,0,0,0.16)",
-                        fontSize: 12,
-                        fontWeight: 800,
-                      }}
-                    >
-                      {exists ? "In deck" : full ? "Deck full" : "Add"}
-                    </div>
-                  </div>
-
-                  <div
-                    style={{
-                      marginTop: 10,
-                      color: "rgba(255,255,255,0.66)",
-                      fontSize: 13,
-                    }}
-                  >
-                    {card.rarity} • {card.type} • {card.universe} • x{card.copies}
-                  </div>
-                </button>
-              );
+  <FighterVisualCard
+    key={card.id}
+    card={card}
+    copies={card.copies}
+    compact
+    imageSrc={`/fighters/${card.id}.png`}
+    onOpenDetails={() => router.push(`/card/${card.id}`)}
+    actionSlot={
+      <button
+        type="button"
+        onClick={() => {
+          if (exists || full) return;
+          addToDeck(card);
+        }}
+        disabled={exists || full}
+        style={secondaryButton()}
+      >
+        {exists ? "In deck" : full ? "Deck full" : "Add"}
+      </button>
+    }
+  />
+);
             })}
 
             {filteredCards.length === 0 && (
