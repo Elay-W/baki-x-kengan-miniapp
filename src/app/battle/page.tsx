@@ -24,6 +24,167 @@ const enemyPools: Record<BattleMode, number[]> = {
 
 type BattleHubMode = "auto-arena" | "arena-clash";
 
+function ModeCard({
+  eyebrow,
+  title,
+  description,
+  active,
+  badge,
+  onClick,
+}: {
+  eyebrow: string;
+  title: string;
+  description: string;
+  active: boolean;
+  badge?: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      style={{
+        ...glassCard(),
+        padding: 18,
+        textAlign: "left",
+        display: "grid",
+        gap: 12,
+        cursor: "pointer",
+        border: active
+          ? "1px solid rgba(255,255,255,0.16)"
+          : "1px solid rgba(255,255,255,0.08)",
+        background: active ? "rgba(255,255,255,0.08)" : "rgba(8,8,12,0.74)",
+        minHeight: 180,
+      }}
+    >
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          gap: 12,
+          alignItems: "start",
+        }}
+      >
+        <div
+          style={{
+            fontSize: 12,
+            fontWeight: 900,
+            letterSpacing: "0.14em",
+            textTransform: "uppercase",
+            opacity: 0.6,
+          }}
+        >
+          {eyebrow}
+        </div>
+
+        {badge && (
+          <div
+            style={{
+              padding: "6px 10px",
+              borderRadius: 999,
+              fontSize: 11,
+              fontWeight: 800,
+              background: "rgba(255,255,255,0.05)",
+              border: "1px solid rgba(255,255,255,0.08)",
+              whiteSpace: "nowrap",
+            }}
+          >
+            {badge}
+          </div>
+        )}
+      </div>
+
+      <div
+        style={{
+          fontSize: 34,
+          fontWeight: 900,
+          lineHeight: 0.96,
+        }}
+      >
+        {title}
+      </div>
+
+      <div
+        style={{
+          fontSize: 14,
+          lineHeight: 1.48,
+          opacity: 0.76,
+          maxWidth: 360,
+        }}
+      >
+        {description}
+      </div>
+    </button>
+  );
+}
+
+function MiniDeckCard({ card }: { card: FighterCard }) {
+  const rarity = rarityColors(card.rarity);
+
+  return (
+    <div
+      style={{
+        ...glassCard(),
+        padding: 12,
+        display: "grid",
+        gap: 6,
+        border: `1px solid ${rarity.border}`,
+        background: rarity.bg,
+        minHeight: 96,
+      }}
+    >
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          gap: 8,
+          alignItems: "start",
+        }}
+      >
+        <div
+          style={{
+            fontSize: 14,
+            fontWeight: 900,
+            lineHeight: 1.1,
+          }}
+        >
+          {card.name}
+        </div>
+
+        <div
+          style={{
+            fontSize: 11,
+            fontWeight: 800,
+            color: rarity.text,
+            whiteSpace: "nowrap",
+          }}
+        >
+          {card.stars}★
+        </div>
+      </div>
+
+      <div
+        style={{
+          fontSize: 12,
+          opacity: 0.72,
+          lineHeight: 1.3,
+        }}
+      >
+        {card.title}
+      </div>
+
+      <div
+        style={{
+          fontSize: 11,
+          opacity: 0.62,
+        }}
+      >
+        {card.rarity}
+      </div>
+    </div>
+  );
+}
+
 export default function BattlePage() {
   const router = useRouter();
 
@@ -31,10 +192,11 @@ export default function BattlePage() {
   const [autoMode, setAutoMode] = useState<BattleMode>("Casual");
   const [deck, setDeck] = useState<FighterCard[]>([]);
   const [message, setMessage] = useState("");
+  const [isHydrated, setIsHydrated] = useState(false);
 
   useEffect(() => {
-    const storedDeck = loadDeck();
-    setDeck(storedDeck);
+    setDeck(loadDeck());
+    setIsHydrated(true);
   }, []);
 
   const enemyTeam = useMemo(() => {
@@ -44,6 +206,7 @@ export default function BattlePage() {
       .filter(Boolean) as FighterCard[];
   }, [autoMode]);
 
+  const deckPreview = useMemo(() => deck.slice(0, 3), [deck]);
   const isDeckReady = deck.length === 5;
 
   function handleStartAutoBattle() {
@@ -70,436 +233,454 @@ export default function BattlePage() {
     router.push("/battle/arena-clash");
   }
 
-  function renderDeckCard(card: FighterCard) {
-    const tone = rarityColors(card.rarity);
-
-    return (
-      <div
-        key={card.id}
+  return (
+    <PageShell
+      playerName="Underground Fighter"
+      yen={24500}
+      tokens={180}
+    >
+      <section
         style={{
           ...glassCard(),
-          padding: 12,
+          padding: 18,
           display: "grid",
-          gap: 6,
-          border: `1px solid ${tone.border}`,
-          background: tone.bg,
+          gap: 12,
+          border: "1px solid rgba(255,255,255,0.08)",
+          background: "rgba(8,8,12,0.76)",
         }}
       >
-        <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
-          <div style={{ fontWeight: 800 }}>{card.name}</div>
+        <div
+          style={{
+            fontSize: 12,
+            fontWeight: 900,
+            letterSpacing: "0.14em",
+            textTransform: "uppercase",
+            opacity: 0.6,
+          }}
+        >
+          Battle Hub
+        </div>
+
+        <div
+          style={{
+            fontSize: 38,
+            fontWeight: 900,
+            lineHeight: 0.94,
+          }}
+        >
+          Choose Your Arena
+        </div>
+
+        <div
+          style={{
+            fontSize: 14,
+            lineHeight: 1.48,
+            opacity: 0.76,
+            maxWidth: 360,
+          }}
+        >
+          Pick your combat style, bring your saved fighters, and enter the next match.
+        </div>
+      </section>
+
+      <section
+        style={{
+          display: "grid",
+          gap: 12,
+        }}
+      >
+        <ModeCard
+          eyebrow="Fast Mode"
+          title="Auto Arena"
+          description="Quick battle setup with Ranked, Casual, and Training presets. Best for short sessions and fast progression."
+          active={hubMode === "auto-arena"}
+          badge="Classic"
+          onClick={() => {
+            setHubMode("auto-arena");
+            setMessage("");
+          }}
+        />
+
+        <ModeCard
+          eyebrow="Tactical Mode"
+          title="Arena Clash"
+          description="Manual actions, Focus, Tempo, switching, and signature skills. A deeper mode built around stat clashes and decisions."
+          active={hubMode === "arena-clash"}
+          badge="Manual"
+          onClick={() => {
+            setHubMode("arena-clash");
+            setMessage("");
+          }}
+        />
+      </section>
+
+      <section
+        style={{
+          ...glassCard(),
+          padding: 16,
+          display: "grid",
+          gap: 14,
+          border: "1px solid rgba(255,255,255,0.08)",
+          background: "rgba(8,8,12,0.76)",
+        }}
+      >
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            gap: 12,
+            alignItems: "center",
+            flexWrap: "wrap",
+          }}
+        >
+          <div>
+            <div
+              style={{
+                fontSize: 12,
+                fontWeight: 900,
+                letterSpacing: "0.14em",
+                textTransform: "uppercase",
+                opacity: 0.6,
+              }}
+            >
+              Main Team
+            </div>
+            <div
+              style={{
+                fontSize: 22,
+                fontWeight: 900,
+              }}
+            >
+              Saved Arena Deck
+            </div>
+          </div>
+
           <div
             style={{
+              padding: "7px 10px",
+              borderRadius: 999,
+              background: "rgba(255,255,255,0.05)",
+              border: "1px solid rgba(255,255,255,0.08)",
               fontSize: 12,
               fontWeight: 800,
-              color: tone.text,
-              whiteSpace: "nowrap",
             }}
           >
-            {card.stars}★
+            {isHydrated ? `${deck.length}/5` : "0/5"}
           </div>
         </div>
 
-        <div style={{ fontSize: 12, opacity: 0.72 }}>
-          {card.rarity} • {card.type} • {card.universe}
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <PageShell>
-      <main
-        style={{
-          padding: "16px 16px 120px",
-          display: "grid",
-          gap: 16,
-        }}
-      >
-        <section
-          style={{
-            ...glassCard(),
-            padding: 18,
-            display: "grid",
-            gap: 10,
-          }}
-        >
+        {isHydrated && deck.length > 0 ? (
           <div
             style={{
-              fontSize: 12,
-              fontWeight: 900,
-              letterSpacing: "0.14em",
-              textTransform: "uppercase",
-              color: "rgba(255,255,255,0.6)",
+              display: "grid",
+              gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+              gap: 10,
             }}
           >
-            Battle Hub
+            {deckPreview.map((card) => (
+              <MiniDeckCard key={card.id} card={card} />
+            ))}
           </div>
-
-          <div style={{ fontSize: 28, fontWeight: 900 }}>Choose Your Arena</div>
-
-          <div style={{ fontSize: 14, lineHeight: 1.5, opacity: 0.76, maxWidth: 860 }}>
-            Auto Arena stays as the faster battle mode, while Arena Clash is the deeper
-            tactical mode with manual actions and skill timing.
+        ) : (
+          <div
+            style={{
+              borderRadius: 18,
+              padding: 14,
+              background: "rgba(255,255,255,0.04)",
+              border: "1px solid rgba(255,255,255,0.06)",
+              fontSize: 14,
+              opacity: 0.74,
+              lineHeight: 1.45,
+            }}
+          >
+            {isHydrated
+              ? "No saved deck yet. Go to Deck and build a 5-card team."
+              : "Loading your saved deck from local storage."}
           </div>
-        </section>
+        )}
 
-        <section
+        <div
           style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
-            gap: 14,
+            display: "flex",
+            gap: 8,
+            flexWrap: "wrap",
           }}
         >
-          <button
-            type="button"
-            onClick={() => {
-              setHubMode("auto-arena");
-              setMessage("");
-            }}
-            style={{
-              ...glassCard(),
-              padding: 18,
-              textAlign: "left",
-              display: "grid",
-              gap: 10,
-              cursor: "pointer",
-              border:
-                hubMode === "auto-arena"
-                  ? "1px solid rgba(255,255,255,0.18)"
-                  : "1px solid rgba(255,255,255,0.08)",
-              background:
-                hubMode === "auto-arena"
-                  ? "rgba(255,255,255,0.09)"
-                  : "rgba(255,255,255,0.04)",
-            }}
-          >
-            <div
-              style={{
-                fontSize: 12,
-                fontWeight: 900,
-                letterSpacing: "0.14em",
-                textTransform: "uppercase",
-                opacity: 0.6,
-              }}
-            >
-              Fast Mode
-            </div>
+          {isHydrated &&
+            deck.slice(0, 5).map((card) => (
+              <div
+                key={`deck-chip-${card.id}`}
+                style={{
+                  padding: "7px 10px",
+                  borderRadius: 999,
+                  background: "rgba(255,255,255,0.05)",
+                  border: "1px solid rgba(255,255,255,0.08)",
+                  fontSize: 12,
+                  fontWeight: 700,
+                }}
+              >
+                {card.name}
+              </div>
+            ))}
+        </div>
+      </section>
 
-            <div style={{ fontSize: 24, fontWeight: 900 }}>Auto Arena</div>
-
-            <div style={{ fontSize: 14, lineHeight: 1.45, opacity: 0.74 }}>
-              Quick battle setup with Ranked, Casual, and Training presets. Best for fast
-              matches and lightweight progression.
-            </div>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => {
-              setHubMode("arena-clash");
-              setMessage("");
-            }}
-            style={{
-              ...glassCard(),
-              padding: 18,
-              textAlign: "left",
-              display: "grid",
-              gap: 10,
-              cursor: "pointer",
-              border:
-                hubMode === "arena-clash"
-                  ? "1px solid rgba(255,255,255,0.18)"
-                  : "1px solid rgba(255,255,255,0.08)",
-              background:
-                hubMode === "arena-clash"
-                  ? "rgba(255,255,255,0.09)"
-                  : "rgba(255,255,255,0.04)",
-            }}
-          >
-            <div
-              style={{
-                fontSize: 12,
-                fontWeight: 900,
-                letterSpacing: "0.14em",
-                textTransform: "uppercase",
-                opacity: 0.6,
-              }}
-            >
-              Tactical Mode
-            </div>
-
-            <div style={{ fontSize: 24, fontWeight: 900 }}>Arena Clash</div>
-
-            <div style={{ fontSize: 14, lineHeight: 1.45, opacity: 0.74 }}>
-              A deeper 5v5 stat-clash mode with manual actions, Focus, Tempo, switching,
-              and manually activated signature skills.
-            </div>
-          </button>
-        </section>
-
+      {hubMode === "auto-arena" ? (
         <section
           style={{
             ...glassCard(),
             padding: 16,
             display: "grid",
             gap: 14,
+            border: "1px solid rgba(255,255,255,0.08)",
+            background: "rgba(8,8,12,0.76)",
           }}
         >
-          <div
-            style={{
-              display: "flex",
-              justifyContent: "space-between",
-              gap: 12,
-              alignItems: "center",
-              flexWrap: "wrap",
-            }}
-          >
-            <div>
-              <div
-                style={{
-                  fontSize: 12,
-                  opacity: 0.6,
-                  textTransform: "uppercase",
-                  letterSpacing: "0.14em",
-                }}
-              >
-                Your Deck
-              </div>
-              <div style={{ fontSize: 22, fontWeight: 900 }}>Saved Main Team</div>
-            </div>
-
+          <div>
             <div
               style={{
-                padding: "8px 12px",
-                borderRadius: 999,
-                background: "rgba(255,255,255,0.05)",
-                border: "1px solid rgba(255,255,255,0.08)",
-                fontSize: 13,
-                fontWeight: 800,
+                fontSize: 12,
+                fontWeight: 900,
+                letterSpacing: "0.14em",
+                textTransform: "uppercase",
+                opacity: 0.6,
               }}
             >
-              {deck.length}/5
+              Auto Arena
+            </div>
+            <div
+              style={{
+                fontSize: 22,
+                fontWeight: 900,
+              }}
+            >
+              Mode Select
             </div>
           </div>
 
-          {deck.length > 0 ? (
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+              gap: 10,
+            }}
+          >
+            {(["Ranked", "Casual", "Training"] as BattleMode[]).map((item) => {
+              const active = autoMode === item;
+
+              return (
+                <button
+                  key={item}
+                  type="button"
+                  onClick={() => {
+                    setAutoMode(item);
+                    setMessage("");
+                  }}
+                  style={{
+                    padding: "14px 12px",
+                    borderRadius: 16,
+                    border: active
+                      ? "1px solid rgba(255,255,255,0.16)"
+                      : "1px solid rgba(255,255,255,0.08)",
+                    background: active ? "#ffffff" : "rgba(255,255,255,0.04)",
+                    color: active ? "#000000" : "#ffffff",
+                    fontWeight: 800,
+                    fontSize: 14,
+                    cursor: "pointer",
+                  }}
+                >
+                  {item}
+                </button>
+              );
+            })}
+          </div>
+
+          <div
+            style={{
+              display: "grid",
+              gap: 10,
+            }}
+          >
+            <div
+              style={{
+                fontSize: 12,
+                fontWeight: 900,
+                letterSpacing: "0.14em",
+                textTransform: "uppercase",
+                opacity: 0.6,
+              }}
+            >
+              Opponent Preview
+            </div>
+
             <div
               style={{
                 display: "grid",
-                gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+                gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
                 gap: 10,
               }}
             >
-              {deck.map(renderDeckCard)}
+              {enemyTeam.slice(0, 3).map((card) => (
+                <MiniDeckCard key={`enemy-${card.id}`} card={card} />
+              ))}
             </div>
-          ) : (
-            <div
-              style={{
-                background: "rgba(255,255,255,0.04)",
-                borderRadius: 16,
-                padding: 14,
-                fontSize: 14,
-                opacity: 0.72,
-              }}
-            >
-              No saved deck found.
-            </div>
-          )}
-        </section>
+          </div>
 
-        {hubMode === "auto-arena" ? (
-          <>
-            <section
-              style={{
-                ...glassCard(),
-                padding: 16,
-                display: "grid",
-                gap: 12,
-              }}
-            >
-              <div>
-                <div
-                  style={{
-                    fontSize: 12,
-                    opacity: 0.6,
-                    textTransform: "uppercase",
-                    letterSpacing: "0.14em",
-                  }}
-                >
-                  Auto Arena
-                </div>
-                <div style={{ fontSize: 22, fontWeight: 900 }}>Mode Select</div>
-              </div>
-
-              <div
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
-                  gap: 10,
-                }}
-              >
-                {(["Ranked", "Casual", "Training"] as BattleMode[]).map((item) => {
-                  const active = autoMode === item;
-
-                  return (
-                    <button
-                      key={item}
-                      type="button"
-                      onClick={() => {
-                        setAutoMode(item);
-                        setMessage("");
-                      }}
-                      style={{
-                        padding: "14px 12px",
-                        borderRadius: 16,
-                        border: active
-                          ? "1px solid rgba(255,255,255,0.18)"
-                          : "1px solid rgba(255,255,255,0.08)",
-                        background: active ? "#ffffff" : "rgba(255,255,255,0.04)",
-                        color: active ? "#000000" : "#ffffff",
-                        fontWeight: 700,
-                        fontSize: 14,
-                        cursor: "pointer",
-                      }}
-                    >
-                      {item}
-                    </button>
-                  );
-                })}
-              </div>
-            </section>
-
-            <section
-              style={{
-                ...glassCard(),
-                padding: 16,
-                display: "grid",
-                gap: 14,
-              }}
-            >
-              <div>
-                <div
-                  style={{
-                    fontSize: 12,
-                    opacity: 0.6,
-                    textTransform: "uppercase",
-                    letterSpacing: "0.14em",
-                  }}
-                >
-                  Enemy Preview
-                </div>
-                <div style={{ fontSize: 22, fontWeight: 900 }}>
-                  Opponent Lineup for {autoMode}
-                </div>
-              </div>
-
-              <div
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-                  gap: 10,
-                }}
-              >
-                {enemyTeam.map(renderDeckCard)}
-              </div>
-            </section>
-
-            <section
-              style={{
-                ...glassCard(),
-                padding: 16,
-                display: "grid",
-                gap: 12,
-              }}
-            >
-              <div>
-                <div
-                  style={{
-                    fontSize: 12,
-                    opacity: 0.6,
-                    textTransform: "uppercase",
-                    letterSpacing: "0.14em",
-                  }}
-                >
-                  Ready Check
-                </div>
-                <div style={{ fontSize: 22, fontWeight: 900 }}>Enter Auto Arena</div>
-              </div>
-
-              <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-                <button type="button" onClick={handleStartAutoBattle} style={primaryButton()}>
-                  Start Battle
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => {
-                    setAutoMode("Casual");
-                    setMessage("");
-                  }}
-                  style={secondaryButton()}
-                >
-                  Reset
-                </button>
-              </div>
-
-              <div style={{ fontSize: 14, opacity: 0.72 }}>
-                {message || "Choose an Auto Arena mode and begin."}
-              </div>
-            </section>
-          </>
-        ) : (
-          <section
+          <div
             style={{
-              ...glassCard(),
-              padding: 16,
-              display: "grid",
-              gap: 12,
+              display: "flex",
+              gap: 10,
+              flexWrap: "wrap",
             }}
           >
-            <div>
-              <div
-                style={{
-                  fontSize: 12,
-                  opacity: 0.6,
-                  textTransform: "uppercase",
-                  letterSpacing: "0.14em",
-                }}
-              >
-                Arena Clash
-              </div>
-              <div style={{ fontSize: 22, fontWeight: 900 }}>Enter Tactical Mode</div>
+            <button type="button" onClick={handleStartAutoBattle} style={primaryButton()}>
+              Start Auto Arena
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                setAutoMode("Casual");
+                setMessage("");
+              }}
+              style={secondaryButton()}
+            >
+              Reset
+            </button>
+          </div>
+
+          <div
+            style={{
+              fontSize: 14,
+              lineHeight: 1.45,
+              opacity: 0.72,
+            }}
+          >
+            {message || "Select a mode and begin the next automatic match."}
+          </div>
+        </section>
+      ) : (
+        <section
+          style={{
+            ...glassCard(),
+            padding: 16,
+            display: "grid",
+            gap: 14,
+            border: "1px solid rgba(255,255,255,0.08)",
+            background: "rgba(8,8,12,0.76)",
+          }}
+        >
+          <div>
+            <div
+              style={{
+                fontSize: 12,
+                fontWeight: 900,
+                letterSpacing: "0.14em",
+                textTransform: "uppercase",
+                opacity: 0.6,
+              }}
+            >
+              Arena Clash
+            </div>
+            <div
+              style={{
+                fontSize: 22,
+                fontWeight: 900,
+              }}
+            >
+              Enter Tactical Mode
+            </div>
+          </div>
+
+          <div
+            style={{
+              fontSize: 14,
+              lineHeight: 1.48,
+              opacity: 0.76,
+            }}
+          >
+            In Arena Clash, every exchange matters. Choose actions manually, spend Focus,
+            rotate fighters with Tempo, and push toward a decisive stat clash.
+          </div>
+
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+              gap: 10,
+            }}
+          >
+            <div
+              style={{
+                borderRadius: 16,
+                padding: 12,
+                background: "rgba(255,255,255,0.04)",
+                border: "1px solid rgba(255,255,255,0.06)",
+              }}
+            >
+              <div style={{ fontSize: 11, opacity: 0.6 }}>Action Set</div>
+              <div style={{ fontSize: 16, fontWeight: 900, marginTop: 4 }}>5 Commands</div>
             </div>
 
-            <div style={{ fontSize: 14, lineHeight: 1.5, opacity: 0.76, maxWidth: 860 }}>
-              In Arena Clash, you manually choose Strike, Guard, Skill, Switch, or Charge.
-              Skills cost Focus, switching costs Tempo, and the exchange outcome still comes
-              from stat collisions rather than auto-win effects.
+            <div
+              style={{
+                borderRadius: 16,
+                padding: 12,
+                background: "rgba(255,255,255,0.04)",
+                border: "1px solid rgba(255,255,255,0.06)",
+              }}
+            >
+              <div style={{ fontSize: 11, opacity: 0.6 }}>Resources</div>
+              <div style={{ fontSize: 16, fontWeight: 900, marginTop: 4 }}>Focus + Tempo</div>
             </div>
 
-            <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-              <button type="button" onClick={handleStartArenaClash} style={primaryButton()}>
-                Enter Arena Clash
-              </button>
-
-              <button
-                type="button"
-                onClick={() => {
-                  setHubMode("auto-arena");
-                  setMessage("");
-                }}
-                style={secondaryButton()}
-              >
-                Back to Auto Arena
-              </button>
+            <div
+              style={{
+                borderRadius: 16,
+                padding: 12,
+                background: "rgba(255,255,255,0.04)",
+                border: "1px solid rgba(255,255,255,0.06)",
+              }}
+            >
+              <div style={{ fontSize: 11, opacity: 0.6 }}>Team Size</div>
+              <div style={{ fontSize: 16, fontWeight: 900, marginTop: 4 }}>5 Fighters</div>
             </div>
+          </div>
 
-            <div style={{ fontSize: 14, opacity: 0.72 }}>
-              {message || "Bring a full 5-card team into Arena Clash."}
-            </div>
-          </section>
-        )}
-      </main>
+          <div
+            style={{
+              display: "flex",
+              gap: 10,
+              flexWrap: "wrap",
+            }}
+          >
+            <button type="button" onClick={handleStartArenaClash} style={primaryButton()}>
+              Enter Arena Clash
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                setHubMode("auto-arena");
+                setMessage("");
+              }}
+              style={secondaryButton()}
+            >
+              Switch to Auto
+            </button>
+          </div>
+
+          <div
+            style={{
+              fontSize: 14,
+              lineHeight: 1.45,
+              opacity: 0.72,
+            }}
+          >
+            {message || "Bring a full 5-card team into Arena Clash."}
+          </div>
+        </section>
+      )}
     </PageShell>
   );
 }

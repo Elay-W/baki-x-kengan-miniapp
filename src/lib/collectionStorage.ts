@@ -1,6 +1,7 @@
 import { cards } from "@/data/cards";
 import type { FighterCard, Rarity } from "@/types/game";
 
+
 const COLLECTION_KEY = "bxk_owned_cards";
 
 export type OwnedCardsMap = Record<number, number>;
@@ -89,4 +90,32 @@ export function seedStarterCollection() {
   }
 
   saveOwnedCardsMap(map);
+}
+export type CollectionCard = FighterCard & { copies: number };
+
+export function loadCollection(): CollectionCard[] {
+  if (typeof window === "undefined") return [];
+
+  try {
+    const raw = window.localStorage.getItem("baki_x_kengan_collection");
+    if (!raw) return [];
+
+    const parsed = JSON.parse(raw);
+
+    if (!Array.isArray(parsed)) return [];
+
+    return parsed
+      .map((item) => {
+        const base = cards.find((card) => card.id === item.id);
+        if (!base) return null;
+
+        return {
+          ...base,
+          copies: typeof item.copies === "number" ? item.copies : 1,
+        };
+      })
+      .filter((item): item is CollectionCard => item !== null);
+  } catch {
+    return [];
+  }
 }

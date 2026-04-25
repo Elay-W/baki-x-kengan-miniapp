@@ -1,590 +1,942 @@
+import { cards } from "@/data/cards";
 import {
-  ARENA_CLASH_TEMPO_PER_NEW_ROUND,
-  clampArenaClashFocus,
-  clampArenaClashTempo,
-  createArenaClashTeamState,
-  getArenaClashActiveCard,
-  getArenaClashTempoCostByRarity,
-  type ArenaClashActionSelection,
-  type ArenaClashBattleCardRuntime,
-  type ArenaClashBattleResult,
-  type ArenaClashFighterCard,
-  type ArenaClashMatchState,
-  type ArenaClashSide,
-  type ArenaClashStatusApplication,
-  type ArenaClashStatusInstance,
-  type ArenaClashStatusType,
-  type ArenaClashTeamState,
+  getArenaClashFighterProfile,
+  getArenaClashSkill,
+  getArenaClashSupport,
+} from "@/lib/arenaClashSkillRegistry";
+import type {
+  ActiveBoardSlotId,
+  ArenaClashActionType,
+  ArenaClashDeployRow,
+  ArenaClashFighterProfile,
+  ArenaClashMatchState,
+  ArenaClashPhase,
+  ArenaClashPopupDefinition,
+  ArenaClashPopupEvent,
+  ArenaClashRow,
+  ArenaClashRuntimeStatusInstance,
+  ArenaClashRuntimeUnit,
+  ArenaClashSide,
+  ArenaClashSkillDefinition,
+  ArenaClashStatBlock,
+  ArenaClashStoredSetup,
+  ArenaClashSupportCard,
+  ArenaClashTeamState,
 } from "@/lib/arenaClashTypes";
 import {
-  getArenaClashSkill,
-  resolveArenaClashSkillKey,
-} from "@/lib/arenaClashSkillRegistry";
-import { resolveArenaClashExchange } from "@/lib/arenaClashResolver";
+  ACTIVE_BOARD_SLOTS,
+  ARENA_CLASH_CONFIG,
+  ARENA_POPUPS,
+} from "@/lib/arenaClashTypes";
+import type { FighterCard } from "@/types/game";
 
-function cloneStatus(status: ArenaClashStatusInstance): ArenaClashStatusInstance {
+export function clamp(value: number, min = 0, max = 999999): number {
+  return Math.max(min, Math.min(max, value));
+}
+
+export function round(value: number, digits = 2): number {
+  const factor = 10 ** digits;
+  return Math.round(value * factor) / factor;
+}
+
+export function getSlotMeta(slotId: ActiveBoardSlotId) {
+  return ACTIVE_BOARD_SLOTS.find((slot) => slot.id === slotId)!;
+}
+
+export function isFrontSlot(slotId: ActiveBoardSlotId): boolean {
+  return getSlotMeta(slotId).row === "front";
+}
+
+export function isCoreSlot(slotId: ActiveBoardSlotId): boolean {
+  return getSlotMeta(slotId).row === "core";
+}
+
+export function getAllActiveSlotIds(): ActiveBoardSlotId[] {
+  return ACTIVE_BOARD_SLOTS.map((slot) => slot.id);
+}
+
+export function buildArenaStatsFromCard(card: FighterCard): ArenaClashStatBlock {
   return {
-    type: status.type,
-    durationExchanges: status.durationExchanges,
-    stacks: status.stacks,
-    sourceCardId: status.sourceCardId,
+    STR: card.stats.STR,
+    SPD: card.stats.SPD,
+    TECH: card.stats.TECH,
+    DUR: card.stats.DUR,
+    DEF: card.stats.DEF,
+    INSTINCT: card.stats.INSTINCT,
   };
 }
 
-function cloneCard(card: ArenaClashBattleCardRuntime): ArenaClashBattleCardRuntime {
-  return {
-    ...card,
-    card: {
-      ...card.card,
-      stats: { ...card.card.stats },
-      tags: card.card.tags ? [...card.card.tags] : undefined,
-    },
-    statuses: card.statuses.map(cloneStatus),
-    skillState: {
-      cooldowns: { ...card.skillState.cooldowns },
-      usedThisBattle: { ...card.skillState.usedThisBattle },
-      usedThisFielding: { ...card.skillState.usedThisFielding },
-    },
-    flags: { ...card.flags },
-  };
+export function getBreakThreshold(stats: ArenaClashStatBlock): number {
+  return round(
+    30 +
+      stats.DUR * 0.3 +
+      stats.DEF * 0.22 +
+      stats.INSTINCT * 0.16 +
+      stats.TECH * 0.08 +
+      stats.SPD * 0.04,
+  );
 }
 
-function cloneTeam(team: ArenaClashTeamState): ArenaClashTeamState {
-  return {
-    ...team,
-    fighters: team.fighters.map(cloneCard),
-  };
+export function getGuardValue(
+  stats: ArenaClashStatBlock,
+  isFrontline = false,
+): number {
+  const base =
+    stats.DEF * 0.32 +
+    stats.DUR * 0.16 +
+    stats.TECH * 0.18 +
+    stats.INSTINCT * 0.18 +
+    stats.SPD * 0.06;
+
+  return round(base * (isFrontline ? 1.2 : 1));
 }
 
-function cloneMatchState(state: ArenaClashMatchState): ArenaClashMatchState {
-  return {
-    ...state,
-    player: cloneTeam(state.player),
-    enemy: cloneTeam(state.enemy),
-    currentRound: { ...state.currentRound },
-    pendingPlayerAction: state.pendingPlayerAction
-      ? { ...state.pendingPlayerAction }
-      : null,
-    pendingEnemyAction: state.pendingEnemyAction
-      ? { ...state.pendingEnemyAction }
-      : null,
-    lastResolution: state.lastResolution
-      ? {
-          ...state.lastResolution,
-          playerAction: { ...state.lastResolution.playerAction },
-          enemyAction: { ...state.lastResolution.enemyAction },
-          clashes: state.lastResolution.clashes.map((item) => ({ ...item })),
-          stateTransitions: state.lastResolution.stateTransitions.map((item) => ({
-            ...item,
-          })),
-          statusApplications: state.lastResolution.statusApplications.map((item) => ({
-            ...item,
-          })),
-          focusChanges: { ...state.lastResolution.focusChanges },
-          tempoChanges: { ...state.lastResolution.tempoChanges },
-          logs: [...state.lastResolution.logs],
-        }
-      : null,
-    result: state.result ? { ...state.result } : null,
-    battleLog: [...state.battleLog],
-  };
+export function getChargeForceGain(stats: ArenaClashStatBlock): number {
+  return round(
+    8 +
+      stats.SPD * 0.18 +
+      stats.TECH * 0.16 +
+      stats.INSTINCT * 0.2 +
+      stats.DUR * 0.08 +
+      stats.STR * 0.06,
+  );
 }
 
-function getTeam(match: ArenaClashMatchState, side: ArenaClashSide): ArenaClashTeamState {
-  return side === "player" ? match.player : match.enemy;
+export function getChargeTempoGain(stats: ArenaClashStatBlock): number {
+  return round(stats.SPD * 0.2 + stats.INSTINCT * 0.18 + stats.TECH * 0.1);
 }
 
-function getStatusDuration(status: ArenaClashStatusType): number {
-  switch (status) {
-    case "Strain":
-      return 2;
-    case "Bleed":
-      return 2;
-    case "Shield":
-      return 1;
-    case "Stun":
-      return 1;
-    case "GuardBreak":
-      return 1;
-    case "TempoDown":
-      return 1;
-    default:
-      return 1;
+export function getForceCap(stats: ArenaClashStatBlock): number {
+  return round(
+    20 +
+      stats.STR * 0.22 +
+      stats.TECH * 0.1 +
+      stats.DUR * 0.06 +
+      stats.INSTINCT * 0.08,
+  );
+}
+
+export function getTempoCap(stats: ArenaClashStatBlock): number {
+  return round(
+    20 +
+      stats.SPD * 0.24 +
+      stats.INSTINCT * 0.2 +
+      stats.TECH * 0.12 +
+      stats.STR * 0.04,
+  );
+}
+
+export function getReadValue(stats: ArenaClashStatBlock): number {
+  return round(
+    stats.INSTINCT * 0.34 +
+      stats.SPD * 0.16 +
+      stats.TECH * 0.14 +
+      stats.DEF * 0.06,
+  );
+}
+
+export function getSupportEfficiency(stats: ArenaClashStatBlock): number {
+  return round(
+    stats.TECH * 0.28 +
+      stats.INSTINCT * 0.3 +
+      stats.DUR * 0.08 +
+      stats.DEF * 0.08,
+  );
+}
+
+export function getStrikePressure(
+  stats: ArenaClashStatBlock,
+  spentForce: number,
+): number {
+  return round(
+    stats.STR * 0.3 +
+      stats.SPD * 0.1 +
+      stats.TECH * 0.18 +
+      stats.INSTINCT * 0.18 +
+      stats.DUR * 0.02 +
+      stats.DEF * 0.02 +
+      spentForce * 1.0,
+  );
+}
+
+export function getBurstPressure(
+  stats: ArenaClashStatBlock,
+  spentForce: number,
+): number {
+  return round(
+    stats.STR * 0.26 +
+      stats.SPD * 0.12 +
+      stats.TECH * 0.22 +
+      stats.INSTINCT * 0.22 +
+      stats.DUR * 0.02 +
+      stats.DEF * 0.01 +
+      spentForce * 1.35,
+  );
+}
+
+export function getReadAdvantageBonus(
+  attacker: ArenaClashStatBlock,
+  defender: ArenaClashStatBlock,
+): number {
+  const diff = getReadValue(attacker) - getReadValue(defender);
+
+  if (diff >= 20) return 0.18;
+  if (diff >= 12) return 0.1;
+  if (diff >= 6) return 0.05;
+  if (diff <= -20) return -0.15;
+  if (diff <= -12) return -0.08;
+  if (diff <= -6) return -0.04;
+
+  return 0;
+}
+
+export function getEffectivePressure(params: {
+  attackerStats: ArenaClashStatBlock;
+  defenderStats: ArenaClashStatBlock;
+  action: "Strike" | "Burst";
+  spentForce: number;
+  targetIsGuarding: boolean;
+  targetIsFrontline: boolean;
+  flatGuardBonus?: number;
+  flatReadBonusPct?: number;
+}): number {
+  const base =
+    params.action === "Burst"
+      ? getBurstPressure(params.attackerStats, params.spentForce)
+      : getStrikePressure(params.attackerStats, params.spentForce);
+
+  const readBonusPct =
+    getReadAdvantageBonus(params.attackerStats, params.defenderStats) +
+    (params.flatReadBonusPct ?? 0);
+
+  const guardedBase = params.targetIsGuarding
+    ? getGuardValue(params.defenderStats, params.targetIsFrontline) +
+      (params.flatGuardBonus ?? 0)
+    : 0;
+
+  const pressureAfterRead = base * (1 + readBonusPct);
+  return round(Math.max(0, pressureAfterRead - guardedBase));
+}
+
+export function applyPressureToBreakMeter(params: {
+  currentBreakMeter: number;
+  currentBreakTokens: number;
+  breakThreshold: number;
+  pressure: number;
+}) {
+  const threshold = Math.max(1, params.breakThreshold);
+  const gainPercent = (params.pressure / threshold) * 100;
+
+  let nextBreakMeter = params.currentBreakMeter + gainPercent;
+  let nextBreakTokens = params.currentBreakTokens;
+  let broke = false;
+  let eliminated = false;
+
+  while (nextBreakMeter >= 100) {
+    nextBreakMeter -= 100;
+    nextBreakTokens += 1;
+    broke = true;
+
+    if (nextBreakTokens >= ARENA_CLASH_CONFIG.breakTokensToEliminate) {
+      eliminated = true;
+      nextBreakMeter = 100;
+      break;
+    }
   }
+
+  return {
+    gainPercent: round(gainPercent),
+    nextBreakMeter: round(clamp(nextBreakMeter, 0, 100)),
+    nextBreakTokens,
+    broke,
+    eliminated,
+  };
 }
 
-function mergeOrApplyStatus(
-  card: ArenaClashBattleCardRuntime,
-  application: ArenaClashStatusApplication,
-) {
-  const duration = getStatusDuration(application.status);
-  const existing = card.statuses.find((s) => s.type === application.status);
+export function getSwitchEntryBonuses(stats: ArenaClashStatBlock) {
+  return {
+    tempoBonus: round(stats.SPD * 0.1 + stats.INSTINCT * 0.14),
+    guardBonus: round(stats.DEF * 0.08 + stats.TECH * 0.06),
+    readBonus: round(stats.INSTINCT * 0.1),
+  };
+}
 
-  if (existing) {
-    existing.durationExchanges = Math.max(existing.durationExchanges, duration);
-    existing.stacks = Math.max(existing.stacks ?? 1, 1);
-    return;
-  }
+export function createArenaPopupEvent(params: {
+  text: string;
+  kind: ArenaClashPopupEvent["kind"];
+  color: string;
+  outline: string;
+  side?: ArenaClashSide;
+  slotId?: ActiveBoardSlotId | null;
+  sourceUnitUid?: string;
+  targetUnitUid?: string;
+  durationMs?: number;
+}): ArenaClashPopupEvent {
+  return {
+    id: `popup_${Math.random().toString(36).slice(2, 10)}`,
+    durationMs: 900,
+    ...params,
+  };
+}
 
-  card.statuses.push({
-    type: application.status,
-    durationExchanges: duration,
-    stacks: 1,
-    sourceCardId: card.card.id,
+export function createPopupFromDefinition(
+  definition: ArenaClashPopupDefinition,
+  params?: Partial<Omit<ArenaClashPopupEvent, "id" | "text" | "kind" | "color" | "outline">>,
+): ArenaClashPopupEvent {
+  return createArenaPopupEvent({
+    text: definition.text,
+    kind: definition.kind,
+    color: definition.color,
+    outline: definition.outline,
+    ...params,
   });
 }
 
-function tickExistingStatusesAndCooldowns(match: ArenaClashMatchState) {
-  const teams = [match.player, match.enemy];
-
-  for (const team of teams) {
-    for (const fighter of team.fighters) {
-      fighter.statuses = fighter.statuses
-        .map((status) => ({
-          ...status,
-          durationExchanges: status.durationExchanges - 1,
-        }))
-        .filter((status) => status.durationExchanges > 0);
-
-      for (const key of Object.keys(fighter.skillState.cooldowns)) {
-        const current = fighter.skillState.cooldowns[key] ?? 0;
-        if (current > 0) {
-          fighter.skillState.cooldowns[key] = current - 1;
-        }
-      }
-    }
-  }
+function slugify(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9\s-]/g, "")
+    .trim()
+    .replace(/\s+/g, "-");
 }
 
-function resolveSkillForAction(
-  card: ArenaClashBattleCardRuntime,
-  action: ArenaClashActionSelection,
-) {
-  if (action.type !== "Skill") {
-    return null;
-  }
-
-  const explicitKey = action.skillKey?.trim();
-  if (explicitKey) {
-    return getArenaClashSkill(explicitKey);
-  }
-
-  const fallbackKey = resolveArenaClashSkillKey(card.card);
-  return getArenaClashSkill(fallbackKey);
+function deriveCardSlug(card: FighterCard): string {
+  const maybeSlug = (card as FighterCard & { slug?: string }).slug;
+  return maybeSlug && maybeSlug.trim() ? maybeSlug : slugify(card.name);
 }
 
-function markSkillUsage(
-  card: ArenaClashBattleCardRuntime,
-  action: ArenaClashActionSelection,
-) {
-  const skill = resolveSkillForAction(card, action);
-  if (!skill) {
-    return;
-  }
+function deriveCardSeries(card: FighterCard): "Baki" | "Kengan" | undefined {
+  const maybeSeries = (card as FighterCard & { series?: string }).series;
+  if (maybeSeries === "Baki" || maybeSeries === "Kengan") return maybeSeries;
 
-  card.skillState.usedThisBattle[skill.key] = true;
-  card.skillState.usedThisFielding[skill.key] = true;
+  const maybeUniverse = (card as FighterCard & { universe?: string }).universe;
+  if (maybeUniverse === "Baki" || maybeUniverse === "Kengan") return maybeUniverse;
 
-  if (skill.cooldownExchanges && skill.cooldownExchanges > 0) {
-    card.skillState.cooldowns[skill.key] = skill.cooldownExchanges;
-  }
+  return undefined;
 }
 
-function applyTeamTempoDelta(team: ArenaClashTeamState, delta: number) {
-  team.tempo = clampArenaClashTempo(team.tempo + delta);
+function derivePreferredRowsFromStats(
+  stats: ArenaClashStatBlock,
+): ArenaClashDeployRow[] {
+  const frontScore =
+    stats.DEF * 0.34 + stats.DUR * 0.26 + stats.INSTINCT * 0.12;
+  const coreScore =
+    stats.STR * 0.22 +
+    stats.TECH * 0.22 +
+    stats.SPD * 0.16 +
+    stats.INSTINCT * 0.12;
+
+  if (frontScore > coreScore + 4) return ["front"];
+  if (coreScore > frontScore + 4) return ["core"];
+  return ["front", "core"];
 }
 
-function applyFocusDelta(card: ArenaClashBattleCardRuntime, delta: number) {
-  card.focus = clampArenaClashFocus(card.focus + delta);
+function deriveFallbackRoleTags(
+  stats: ArenaClashStatBlock,
+): ArenaClashFighterProfile["roleTags"] {
+  const tags: ArenaClashFighterProfile["roleTags"] = [];
+
+  if (stats.DEF >= 85 || stats.DUR >= 88) tags.push("frontliner");
+  if (stats.DEF >= 90 && stats.DUR >= 90) tags.push("tank");
+  if (stats.STR >= 90) tags.push("bruiser");
+  if (stats.SPD >= 90) tags.push("tempo");
+  if (stats.TECH >= 90 || stats.INSTINCT >= 92) tags.push("counter");
+  if (stats.STR >= 90 && stats.TECH >= 88) tags.push("burst-carry");
+  if (stats.TECH >= 90 && stats.INSTINCT >= 90) tags.push("controller");
+  if (stats.INSTINCT >= 94 && stats.SPD >= 90) tags.push("switch-specialist");
+  if (stats.TECH >= 88 && stats.INSTINCT >= 86) tags.push("support-friendly");
+  if (stats.STR >= 88 && stats.SPD >= 84) tags.push("core-carry");
+
+  return tags.length > 0 ? tags : ["core-carry"];
 }
 
-function applyResolutionStateTransitions(match: ArenaClashMatchState) {
-  const resolution = match.lastResolution;
-  if (!resolution) return;
+function buildFallbackFighterProfile(card: FighterCard): ArenaClashFighterProfile {
+  const stats = buildArenaStatsFromCard(card);
 
-  for (const transition of resolution.stateTransitions) {
-    const team = getTeam(match, transition.side);
-    const fighter = team.fighters[transition.slot];
-    if (!fighter) continue;
-    fighter.state = transition.to;
-  }
-}
-
-function applyResolutionStatuses(match: ArenaClashMatchState) {
-  const resolution = match.lastResolution;
-  if (!resolution) return;
-
-  for (const application of resolution.statusApplications) {
-    const team = getTeam(match, application.side);
-    const fighter = team.fighters[application.slot];
-    if (!fighter || !application.applied) continue;
-    mergeOrApplyStatus(fighter, application);
-  }
-}
-
-function findNextAvailableSlot(team: ArenaClashTeamState): number | null {
-  for (const fighter of team.fighters) {
-    if (fighter.slot !== team.activeSlot && fighter.state !== "KO") {
-      return fighter.slot;
-    }
-  }
-
-  return null;
-}
-
-function grantEntryFocus(card: ArenaClashBattleCardRuntime) {
-  card.focus = clampArenaClashFocus(card.focus + 1);
-}
-
-function enterField(
-  team: ArenaClashTeamState,
-  slot: number,
-  bySwitch: boolean,
-) {
-  const previousActive = team.fighters[team.activeSlot];
-  if (previousActive) {
-    previousActive.guardStreak = 0;
-    previousActive.chargeStreak = 0;
-  }
-
-  team.activeSlot = slot;
-
-  const fighter = team.fighters[slot];
-  fighter.flags.hasEnteredField = true;
-  fighter.flags.switchedInThisRound = bySwitch;
-  fighter.guardStreak = 0;
-  fighter.chargeStreak = 0;
-  fighter.skillState.usedThisFielding = {};
-  grantEntryFocus(fighter);
-}
-
-function resetRoundFlags(match: ArenaClashMatchState) {
-  for (const fighter of match.player.fighters) {
-    fighter.flags.switchedInThisRound = false;
-    fighter.flags.knockedOutBySwitchPunish = false;
-  }
-
-  for (const fighter of match.enemy.fighters) {
-    fighter.flags.switchedInThisRound = false;
-    fighter.flags.knockedOutBySwitchPunish = false;
-  }
-}
-
-function startNewRound(match: ArenaClashMatchState) {
-  applyTeamTempoDelta(match.player, ARENA_CLASH_TEMPO_PER_NEW_ROUND);
-  applyTeamTempoDelta(match.enemy, ARENA_CLASH_TEMPO_PER_NEW_ROUND);
-
-  match.currentRound = {
-    roundNumber: match.currentRound.roundNumber + 1,
-    startedAtExchange: match.exchangeNumber,
-    activePlayerSlot: match.player.activeSlot,
-    activeEnemySlot: match.enemy.activeSlot,
+  return {
+    fighterId: card.id,
+    slug: deriveCardSlug(card),
+    roleTags: deriveFallbackRoleTags(stats),
+    preferredRows: derivePreferredRowsFromStats(stats),
+    signatureSkillKey: "",
+    supportAffinityTags: [],
   };
-
-  resetRoundFlags(match);
 }
 
-function setMatchResult(
-  match: ArenaClashMatchState,
-  winner: ArenaClashSide | null,
-  loser: ArenaClashSide | null,
-  reason: ArenaClashBattleResult["reason"],
-) {
-  match.result = {
-    winner,
-    loser,
-    reason,
+export function cloneRuntimeStatus(
+  status: ArenaClashRuntimeStatusInstance,
+): ArenaClashRuntimeStatusInstance {
+  return { ...status };
+}
+
+export function cloneRuntimeUnit(
+  unit: ArenaClashRuntimeUnit,
+): ArenaClashRuntimeUnit {
+  return {
+    ...unit,
+    stats: { ...unit.stats },
+    roleTags: [...unit.roleTags],
+    preferredRows: [...unit.preferredRows],
+    supportAffinityTags: unit.supportAffinityTags
+      ? [...unit.supportAffinityTags]
+      : undefined,
+    statusEffects: unit.statusEffects.map(cloneRuntimeStatus),
+    lastPopup: unit.lastPopup ? { ...unit.lastPopup } : null,
   };
-  match.phase = "match-end";
 }
 
-function tryAutoFieldAfterKO(
-  match: ArenaClashMatchState,
-  side: ArenaClashSide,
-): boolean {
-  const team = getTeam(match, side);
-  const active = getArenaClashActiveCard(team);
-
-  if (active.state !== "KO") {
-    return true;
-  }
-
-  const nextSlot = findNextAvailableSlot(team);
-  if (nextSlot == null) {
-    return false;
-  }
-
-  const nextFighter = team.fighters[nextSlot];
-  const cost = getArenaClashTempoCostByRarity(nextFighter.rarity);
-
-  if (team.tempo < cost) {
-    return false;
-  }
-
-  applyTeamTempoDelta(team, -cost);
-  enterField(team, nextSlot, false);
-  match.battleLog.push(
-    `${side} fields ${nextFighter.card.name} for ${cost} Tempo after a KO.`,
-  );
-  return true;
-}
-
-function isAggressiveSkillType(type: string | undefined): boolean {
-  return (
-    type === "Burst" ||
-    type === "Pierce" ||
-    type === "Control" ||
-    type === "Utility"
-  );
-}
-
-function isAggressiveAction(
+export function cloneTeamState(
   team: ArenaClashTeamState,
-  action: ArenaClashActionSelection,
-): boolean {
-  if (action.type === "Strike") {
-    return true;
+): ArenaClashTeamState {
+  const nextActive: ArenaClashTeamState["active"] = {};
+
+  for (const slotId of Object.keys(team.active) as ActiveBoardSlotId[]) {
+    const unit = team.active[slotId];
+    if (unit) nextActive[slotId] = cloneRuntimeUnit(unit);
   }
 
-  if (action.type !== "Skill") {
-    return false;
-  }
-
-  const active = getArenaClashActiveCard(team);
-  const skill = resolveSkillForAction(active, action);
-  return isAggressiveSkillType(skill?.type);
+  return {
+    ...team,
+    active: nextActive,
+    reserve: team.reserve.map(cloneRuntimeUnit),
+    supportLoadout: team.supportLoadout.map((support) => ({
+      ...support,
+      baseModifiers: support.baseModifiers
+        ? { ...support.baseModifiers }
+        : undefined,
+      synergyBySlug: support.synergyBySlug
+        ? Object.fromEntries(
+            Object.entries(support.synergyBySlug).map(([key, value]) => [
+              key,
+              { ...value },
+            ]),
+          )
+        : undefined,
+      keywords: support.keywords ? [...support.keywords] : undefined,
+    })),
+  };
 }
 
-function didSideSwitchSuccessfully(
-  playerTeamBefore: ArenaClashTeamState,
-  enemyTeamBefore: ArenaClashTeamState,
-  resolution: NonNullable<ArenaClashMatchState["lastResolution"]>,
-  side: ArenaClashSide,
-): boolean {
-  const selfAction = side === "player" ? resolution.playerAction : resolution.enemyAction;
-  const oppAction = side === "player" ? resolution.enemyAction : resolution.playerAction;
-
-  if (selfAction.type !== "Switch" || selfAction.targetReserveSlot == null) {
-    return false;
-  }
-
-  const opponentTeamBefore = side === "player" ? enemyTeamBefore : playerTeamBefore;
-
-  if (isAggressiveAction(opponentTeamBefore, oppAction)) {
-    const switchCheck = resolution.clashes.find((clash) => clash.kind === "SwitchCheck");
-    return switchCheck?.winnerSide === side;
-  }
-
-  return true;
-}
-
-function applySuccessfulSwitches(
-  match: ArenaClashMatchState,
-  playerTeamBefore: ArenaClashTeamState,
-  enemyTeamBefore: ArenaClashTeamState,
-): { playerSwitched: boolean; enemySwitched: boolean } {
-  const resolution = match.lastResolution;
-  if (!resolution) {
-    return { playerSwitched: false, enemySwitched: false };
-  }
-
-  let playerSwitched = false;
-  let enemySwitched = false;
-
-  if (didSideSwitchSuccessfully(playerTeamBefore, enemyTeamBefore, resolution, "player")) {
-    const slot = resolution.playerAction.targetReserveSlot!;
-    enterField(match.player, slot, true);
-    match.battleLog.push(`player successfully switches to ${match.player.fighters[slot].card.name}.`);
-    playerSwitched = true;
-  }
-
-  if (didSideSwitchSuccessfully(playerTeamBefore, enemyTeamBefore, resolution, "enemy")) {
-    const slot = resolution.enemyAction.targetReserveSlot!;
-    enterField(match.enemy, slot, true);
-    match.battleLog.push(`enemy successfully switches to ${match.enemy.fighters[slot].card.name}.`);
-    enemySwitched = true;
-  }
-
-  return { playerSwitched, enemySwitched };
-}
-
-function updateActionStreaks(
-  card: ArenaClashBattleCardRuntime,
-  action: ArenaClashActionSelection,
-) {
-  if (action.type === "Guard") {
-    card.guardStreak += 1;
-  } else {
-    card.guardStreak = 0;
-  }
-
-  if (action.type === "Charge") {
-    card.chargeStreak += 1;
-  } else {
-    card.chargeStreak = 0;
-  }
-}
-
-function handlePotentialMatchEndAfterKO(match: ArenaClashMatchState): boolean {
-  const playerAlive = match.player.fighters.some((fighter) => fighter.state !== "KO");
-  const enemyAlive = match.enemy.fighters.some((fighter) => fighter.state !== "KO");
-
-  if (!playerAlive && !enemyAlive) {
-    setMatchResult(match, null, null, "all_ko");
-    return true;
-  }
-
-  if (!playerAlive) {
-    setMatchResult(match, "enemy", "player", "all_ko");
-    return true;
-  }
-
-  if (!enemyAlive) {
-    setMatchResult(match, "player", "enemy", "all_ko");
-    return true;
-  }
-
-  const playerCanField = tryAutoFieldAfterKO(match, "player");
-  const enemyCanField = tryAutoFieldAfterKO(match, "enemy");
-
-  if (!playerCanField && !enemyCanField) {
-    setMatchResult(match, null, null, "no_tempo_to_field");
-    return true;
-  }
-
-  if (!playerCanField) {
-    setMatchResult(match, "enemy", "player", "no_tempo_to_field");
-    return true;
-  }
-
-  if (!enemyCanField) {
-    setMatchResult(match, "player", "enemy", "no_tempo_to_field");
-    return true;
-  }
-
-  return false;
-}
-
-export function createArenaClashMatchState(
-  playerCards: ArenaClashFighterCard[],
-  enemyCards: ArenaClashFighterCard[],
+export function cloneMatchState(
+  state: ArenaClashMatchState,
 ): ArenaClashMatchState {
-  if (playerCards.length === 0) {
-    throw new Error("Player team cannot be empty.");
+  return {
+    ...state,
+    player: cloneTeamState(state.player),
+    enemy: cloneTeamState(state.enemy),
+    queuedPlayerCommands: state.queuedPlayerCommands.map((item) => ({ ...item })),
+    queuedEnemyCommands: state.queuedEnemyCommands.map((item) => ({ ...item })),
+    battleLog: [...state.battleLog],
+    popupQueue: state.popupQueue.map((item) => ({ ...item })),
+  };
+}
+
+export function getTeam(
+  state: ArenaClashMatchState,
+  side: ArenaClashSide,
+): ArenaClashTeamState {
+  return side === "player" ? state.player : state.enemy;
+}
+
+export function getOpponentTeam(
+  state: ArenaClashMatchState,
+  side: ArenaClashSide,
+): ArenaClashTeamState {
+  return side === "player" ? state.enemy : state.player;
+}
+
+export function getUnitAtSlot(
+  team: ArenaClashTeamState,
+  slotId: ActiveBoardSlotId,
+): ArenaClashRuntimeUnit | null {
+  return team.active[slotId] ?? null;
+}
+
+export function getUnitsInSlotOrder(
+  team: ArenaClashTeamState,
+): ArenaClashRuntimeUnit[] {
+  return ACTIVE_BOARD_SLOTS.map((slot) => team.active[slot.id]).filter(
+    (unit): unit is ArenaClashRuntimeUnit => Boolean(unit),
+  );
+}
+
+export function getLivingActiveUnits(
+  team: ArenaClashTeamState,
+): ArenaClashRuntimeUnit[] {
+  return getUnitsInSlotOrder(team).filter((unit) => !unit.eliminated);
+}
+
+export function getLivingReserveUnits(
+  team: ArenaClashTeamState,
+): ArenaClashRuntimeUnit[] {
+  return team.reserve.filter((unit) => !unit.eliminated);
+}
+
+export function countLivingUnits(team: ArenaClashTeamState): number {
+  return getLivingActiveUnits(team).length + getLivingReserveUnits(team).length;
+}
+
+export function hasLivingFrontline(team: ArenaClashTeamState): boolean {
+  return ACTIVE_BOARD_SLOTS.some((slot) => {
+    if (slot.row !== "front") return false;
+    const unit = team.active[slot.id];
+    return Boolean(unit && !unit.eliminated);
+  });
+}
+
+export function hasLivingCore(team: ArenaClashTeamState): boolean {
+  return ACTIVE_BOARD_SLOTS.some((slot) => {
+    if (slot.row !== "core") return false;
+    const unit = team.active[slot.id];
+    return Boolean(unit && !unit.eliminated);
+  });
+}
+
+export function findFirstEmptySlot(
+  team: ArenaClashTeamState,
+  row: ArenaClashDeployRow,
+): ActiveBoardSlotId | null {
+  const slot = ACTIVE_BOARD_SLOTS.find(
+    (entry) => entry.row === row && !team.active[entry.id],
+  );
+  return slot?.id ?? null;
+}
+
+export function findFirstEmptyPreferredSlot(
+  team: ArenaClashTeamState,
+  preferredRows: ArenaClashDeployRow[],
+): ActiveBoardSlotId | null {
+  for (const row of preferredRows) {
+    const slotId = findFirstEmptySlot(team, row);
+    if (slotId) return slotId;
   }
 
-  if (enemyCards.length === 0) {
-    throw new Error("Enemy team cannot be empty.");
+  return findFirstEmptySlot(team, "front") ?? findFirstEmptySlot(team, "core");
+}
+
+export function hasStatus(
+  unit: ArenaClashRuntimeUnit,
+  statusType: ArenaClashRuntimeStatusInstance["type"],
+): boolean {
+  return unit.statusEffects.some((status) => status.type === statusType);
+}
+
+export function addStatus(
+  unit: ArenaClashRuntimeUnit,
+  status: ArenaClashRuntimeStatusInstance,
+): ArenaClashRuntimeUnit {
+  const existing = unit.statusEffects.find((item) => item.type === status.type);
+
+  if (existing) {
+    existing.remainingRounds = Math.max(
+      existing.remainingRounds,
+      status.remainingRounds,
+    );
+    return unit;
   }
 
-  const player = createArenaClashTeamState("player", playerCards);
-  const enemy = createArenaClashTeamState("enemy", enemyCards);
+  unit.statusEffects.push(status);
+  return unit;
+}
+
+export function tickUnitStatuses(unit: ArenaClashRuntimeUnit) {
+  unit.statusEffects = unit.statusEffects
+    .map((status) => ({
+      ...status,
+      remainingRounds: status.remainingRounds - 1,
+    }))
+    .filter((status) => status.remainingRounds > 0);
+
+  unit.staggerRoundsLeft = Math.max(0, unit.staggerRoundsLeft - 1);
+  unit.recoveryLockRounds = Math.max(0, unit.recoveryLockRounds - 1);
+  unit.skillCooldownLeft = Math.max(0, unit.skillCooldownLeft - 1);
+  unit.enteredThisRound = false;
+}
+
+export function resetTeamRoundCounters(team: ArenaClashTeamState) {
+  team.switchesUsedThisRound = 0;
+  team.signaturesUsedThisRound = 0;
+  team.supportsUsedThisRound = 0;
+}
+
+export function tickTeamForNewRound(team: ArenaClashTeamState) {
+  resetTeamRoundCounters(team);
+
+  for (const unit of getUnitsInSlotOrder(team)) {
+    tickUnitStatuses(unit);
+  }
+
+  for (const unit of team.reserve) {
+    tickUnitStatuses(unit);
+  }
+}
+
+export function applyUnitForceDelta(
+  unit: ArenaClashRuntimeUnit,
+  delta: number,
+): ArenaClashRuntimeUnit {
+  unit.force = clamp(unit.force + delta, 0, unit.forceCap);
+  return unit;
+}
+
+export function applyUnitTempoDelta(
+  unit: ArenaClashRuntimeUnit,
+  delta: number,
+): ArenaClashRuntimeUnit {
+  unit.tempo = clamp(unit.tempo + delta, 0, unit.tempoCap);
+  return unit;
+}
+
+export function applyTeamStoredForceDelta(
+  team: ArenaClashTeamState,
+  delta: number,
+): ArenaClashTeamState {
+  team.storedForce = clamp(
+    team.storedForce + delta,
+    0,
+    ARENA_CLASH_CONFIG.storedForceCap,
+  );
+  return team;
+}
+
+export function spendTeamStoredForce(
+  team: ArenaClashTeamState,
+  amount: number,
+): boolean {
+  if (team.storedForce < amount) return false;
+  team.storedForce -= amount;
+  return true;
+}
+
+export function canBurstThisRound(unit: ArenaClashRuntimeUnit): boolean {
+  if (unit.eliminated) return false;
+  if (unit.staggerRoundsLeft > 0) return false;
+  if (
+    unit.enteredThisRound &&
+    ARENA_CLASH_CONFIG.switchedInCannotBurstThisRound
+  ) {
+    return false;
+  }
+  if (hasStatus(unit, "CannotBurst")) return false;
+
+  return true;
+}
+
+export function canUseSignatureSkill(params: {
+  unit: ArenaClashRuntimeUnit;
+  currentRow: ArenaClashRow;
+  phase: ArenaClashPhase;
+  teamSignaturesUsedThisRound: number;
+}): boolean {
+  const skill = getArenaClashSkill(params.unit.signatureSkillKey);
+
+  if (!skill) return false;
+  if (params.unit.eliminated) return false;
+  if (params.unit.staggerRoundsLeft > 0) return false;
+  if (params.unit.skillCooldownLeft > 0) return false;
+  if (skill.oncePerMatch && params.unit.skillUsedThisMatch) return false;
+  if (
+    params.teamSignaturesUsedThisRound >=
+    ARENA_CLASH_CONFIG.teamSignatureLimitPerRound
+  ) {
+    return false;
+  }
+  if (
+    !skill.allowedRows.includes("any") &&
+    !skill.allowedRows.includes(params.currentRow)
+  ) {
+    return false;
+  }
+  if (params.unit.tempo < skill.tempoCost) return false;
+  if ((skill.forceCost ?? 0) > params.unit.force) return false;
+  if (params.phase === "deploy" || params.phase === "enemy-deploy") return false;
+  if (params.phase === "finished") return false;
+
+  if (params.unit.enteredThisRound && !skill.onEntryOnly) {
+    return false;
+  }
+
+  if (skill.type === "Burst" && !canBurstThisRound(params.unit)) {
+    return false;
+  }
+
+  return true;
+}
+
+export function canUseSwitch(params: {
+  team: ArenaClashTeamState;
+  unit: ArenaClashRuntimeUnit;
+}): boolean {
+  if (params.unit.eliminated) return false;
+  if (params.unit.staggerRoundsLeft > 0) return false;
+  if (params.unit.recoveryLockRounds > 0) return false;
+  if (params.team.reserve.every((unit) => unit.eliminated)) return false;
+  if (
+    params.team.switchesUsedThisRound >=
+    ARENA_CLASH_CONFIG.teamSwitchLimitPerRound
+  ) {
+    return false;
+  }
+  if (
+    params.team.storedForce < ARENA_CLASH_CONFIG.switchStoredForceCost
+  ) {
+    return false;
+  }
+
+  return true;
+}
+
+export function canUseSupport(params: {
+  team: ArenaClashTeamState;
+  support: ArenaClashSupportCard;
+  currentRound: number;
+}): boolean {
+  if (
+    params.team.supportsUsedThisRound >=
+    ARENA_CLASH_CONFIG.supportActivationsPerRound
+  ) {
+    return false;
+  }
+  if (params.team.storedForce < params.support.storedForceCost) return false;
+  if (
+    typeof params.support.roundGate === "number" &&
+    params.currentRound < params.support.roundGate
+  ) {
+    return false;
+  }
+
+  return true;
+}
+
+export function buildArenaClashRuntimeUnit(
+  card: FighterCard,
+  side: ArenaClashSide,
+  slotId: ActiveBoardSlotId | null,
+  inReserve = false,
+): ArenaClashRuntimeUnit {
+  const profile = getArenaClashFighterProfile(card.id) ?? buildFallbackFighterProfile(card);
+  const stats = buildArenaStatsFromCard(card);
+
+  return {
+    uid: `${side}_${card.id}_${slotId ?? "reserve"}_${Math.random()
+      .toString(36)
+      .slice(2, 9)}`,
+    side,
+    slotId,
+    inReserve,
+
+    fighterId: card.id,
+    cardName: card.name,
+    cardTitle: card.title,
+    cardSlug: profile.slug || deriveCardSlug(card),
+    rarity: card.rarity,
+    stars: card.stars,
+    series: deriveCardSeries(card),
+
+    stats,
+
+    roleTags: [...profile.roleTags],
+    preferredRows: [...profile.preferredRows],
+    signatureSkillKey: profile.signatureSkillKey,
+    supportAffinityTags: profile.supportAffinityTags
+      ? [...profile.supportAffinityTags]
+      : undefined,
+
+    force: 0,
+    forceCap: getForceCap(stats),
+
+    tempo: 0,
+    tempoCap: getTempoCap(stats),
+
+    breakMeter: 0,
+    breakTokens: 0,
+
+    eliminated: false,
+    staggerRoundsLeft: 0,
+    recoveryLockRounds: 0,
+    enteredThisRound: false,
+
+    lastAction: null,
+    lastPopup: null,
+
+    skillCooldownLeft: 0,
+    skillUsedThisMatch: false,
+
+    statusEffects: [],
+  };
+}
+
+export function buildArenaClashTeamState(params: {
+  side: ArenaClashSide;
+  deckCardIds: number[];
+  supportIds?: string[];
+}): ArenaClashTeamState {
+  const uniqueDeckIds = Array.from(new Set(params.deckCardIds)).slice(
+    0,
+    ARENA_CLASH_CONFIG.deckSize,
+  );
+
+  const deckCards = uniqueDeckIds
+    .map((id) => cards.find((card) => card.id === id))
+    .filter((card): card is FighterCard => Boolean(card));
+
+  if (deckCards.length === 0) {
+    throw new Error(`Arena Clash ${params.side} deck cannot be empty.`);
+  }
+
+  const reserve = deckCards.map((card) =>
+    buildArenaClashRuntimeUnit(card, params.side, null, true),
+  );
+
+  const supportLoadout = (params.supportIds ?? [])
+    .map((id) => getArenaClashSupport(id))
+    .filter((item): item is ArenaClashSupportCard => Boolean(item))
+    .slice(0, ARENA_CLASH_CONFIG.supportEquippedLimit);
+
+  return {
+    side: params.side,
+    active: {},
+    reserve,
+    storedForce: 0,
+    supportLoadout,
+    switchesUsedThisRound: 0,
+    signaturesUsedThisRound: 0,
+    supportsUsedThisRound: 0,
+  };
+}
+
+export function buildArenaClashMatchState(params: {
+  playerDeckIds: number[];
+  enemyDeckIds: number[];
+  playerSupportIds?: string[];
+  enemySupportIds?: string[];
+  setup?: ArenaClashStoredSetup | null;
+}): ArenaClashMatchState {
+  const player = buildArenaClashTeamState({
+    side: "player",
+    deckCardIds: params.playerDeckIds,
+    supportIds: params.playerSupportIds ?? [],
+  });
+
+  const enemy = buildArenaClashTeamState({
+    side: "enemy",
+    deckCardIds: params.enemyDeckIds,
+    supportIds: params.enemySupportIds ?? [],
+  });
 
   return {
     mode: "arena-clash",
-    phase: "choose-actions",
+    phase: "deploy",
+    roundNumber: 1,
+
     player,
     enemy,
-    currentRound: {
-      roundNumber: 1,
-      startedAtExchange: 0,
-      activePlayerSlot: player.activeSlot,
-      activeEnemySlot: enemy.activeSlot,
-    },
-    exchangeNumber: 0,
-    pendingPlayerAction: null,
-    pendingEnemyAction: null,
-    lastResolution: null,
-    result: null,
-    battleLog: ["Arena Clash started."],
+
+    queuedPlayerCommands: [],
+    queuedEnemyCommands: [],
+
+    winner: null,
+    loser: null,
+    finishedReason: "unfinished",
+
+    battleLog: ["Arena Crash initialized."],
+    popupQueue: [
+      createPopupFromDefinition(ARENA_POPUPS.action.switch, {
+        side: "player",
+        slotId: null,
+        durationMs: 700,
+      }),
+    ],
   };
 }
 
-export function resolveArenaClashStep(
-  state: ArenaClashMatchState,
-  playerAction: ArenaClashActionSelection,
-  enemyAction: ArenaClashActionSelection,
-): ArenaClashMatchState {
-  if (state.result || state.phase === "match-end") {
-    return state;
+export function moveReserveUnitToSlot(params: {
+  team: ArenaClashTeamState;
+  reserveUid: string;
+  slotId: ActiveBoardSlotId;
+}): ArenaClashRuntimeUnit | null {
+  const reserveIndex = params.team.reserve.findIndex(
+    (unit) => unit.uid === params.reserveUid && !unit.eliminated,
+  );
+  if (reserveIndex === -1) return null;
+  if (params.team.active[params.slotId]) return null;
+
+  const reserveUnit = params.team.reserve[reserveIndex];
+  const placed = cloneRuntimeUnit(reserveUnit);
+
+  placed.slotId = params.slotId;
+  placed.inReserve = false;
+  placed.enteredThisRound = true;
+  placed.recoveryLockRounds = 0;
+  placed.lastPopup = ARENA_POPUPS.result.entry;
+
+  params.team.reserve.splice(reserveIndex, 1);
+  params.team.active[params.slotId] = placed;
+
+  return placed;
+}
+
+export function moveActiveUnitToReserve(params: {
+  team: ArenaClashTeamState;
+  slotId: ActiveBoardSlotId;
+}): ArenaClashRuntimeUnit | null {
+  const current = params.team.active[params.slotId];
+  if (!current) return null;
+
+  const moved = cloneRuntimeUnit(current);
+  moved.slotId = null;
+  moved.inReserve = true;
+  moved.enteredThisRound = false;
+  moved.recoveryLockRounds = ARENA_CLASH_CONFIG.switchRecoveryLockRounds;
+
+  delete params.team.active[params.slotId];
+  params.team.reserve.push(moved);
+
+  return moved;
+}
+
+export function removeEliminatedFromReserve(team: ArenaClashTeamState) {
+  team.reserve = team.reserve.filter((unit) => !unit.eliminated);
+}
+
+export function getCardById(cardId: number): FighterCard | null {
+  return cards.find((card) => card.id === cardId) ?? null;
+}
+
+export function getAliveUnitCountOnBoard(team: ArenaClashTeamState): number {
+  return getUnitsInSlotOrder(team).filter((unit) => !unit.eliminated).length;
+}
+
+export function getAliveUnitCountTotal(team: ArenaClashTeamState): number {
+  return countLivingUnits(team);
+}
+
+export function setUnitLastAction(
+  unit: ArenaClashRuntimeUnit,
+  action: ArenaClashActionType | null,
+) {
+  unit.lastAction = action;
+}
+
+export function setUnitLastPopup(
+  unit: ArenaClashRuntimeUnit,
+  popup: ArenaClashPopupDefinition | null,
+) {
+  unit.lastPopup = popup;
+}
+
+export function markSkillUsage(
+  unit: ArenaClashRuntimeUnit,
+  skill: ArenaClashSkillDefinition,
+) {
+  unit.skillUsedThisMatch = true;
+  unit.skillCooldownLeft = Math.max(
+    unit.skillCooldownLeft,
+    skill.cooldownRounds ?? ARENA_CLASH_CONFIG.defaultSignatureCooldown,
+  );
+  unit.tempo = clamp(unit.tempo - skill.tempoCost, 0, unit.tempoCap);
+
+  if (skill.forceCost) {
+    unit.force = clamp(unit.force - skill.forceCost, 0, unit.forceCap);
   }
-
-  const next = cloneMatchState(state);
-
-  const playerTeamBefore = cloneTeam(next.player);
-  const enemyTeamBefore = cloneTeam(next.enemy);
-
-  const playerActiveSlotBefore = next.player.activeSlot;
-  const enemyActiveSlotBefore = next.enemy.activeSlot;
-
-  next.phase = "resolve-exchange";
-  next.pendingPlayerAction = { ...playerAction };
-  next.pendingEnemyAction = { ...enemyAction };
-  next.exchangeNumber += 1;
-
-  const resolution = resolveArenaClashExchange({
-    playerTeam: next.player,
-    enemyTeam: next.enemy,
-    playerAction,
-    enemyAction,
-    exchangeNumber: next.exchangeNumber,
-  });
-
-  next.lastResolution = resolution;
-  next.battleLog.push(...resolution.logs);
-
-  applyTeamTempoDelta(next.player, resolution.tempoChanges.player);
-  applyTeamTempoDelta(next.enemy, resolution.tempoChanges.enemy);
-
-  applyFocusDelta(
-    next.player.fighters[playerActiveSlotBefore],
-    resolution.focusChanges.player,
-  );
-  applyFocusDelta(
-    next.enemy.fighters[enemyActiveSlotBefore],
-    resolution.focusChanges.enemy,
-  );
-
-  updateActionStreaks(next.player.fighters[playerActiveSlotBefore], resolution.playerAction);
-  updateActionStreaks(next.enemy.fighters[enemyActiveSlotBefore], resolution.enemyAction);
-
-  markSkillUsage(next.player.fighters[playerActiveSlotBefore], resolution.playerAction);
-  markSkillUsage(next.enemy.fighters[enemyActiveSlotBefore], resolution.enemyAction);
-
-  applyResolutionStateTransitions(next);
-
-  tickExistingStatusesAndCooldowns(next);
-  applyResolutionStatuses(next);
-
-  const { playerSwitched, enemySwitched } = applySuccessfulSwitches(
-    next,
-    playerTeamBefore,
-    enemyTeamBefore,
-  );
-
-  const playerActiveIsKO = getArenaClashActiveCard(next.player).state === "KO";
-  const enemyActiveIsKO = getArenaClashActiveCard(next.enemy).state === "KO";
-
-  const shouldAdvanceRound =
-    playerSwitched || enemySwitched || playerActiveIsKO || enemyActiveIsKO;
-
-  if (shouldAdvanceRound) {
-    startNewRound(next);
-
-    const ended = handlePotentialMatchEndAfterKO(next);
-    if (ended) {
-      next.pendingPlayerAction = null;
-      next.pendingEnemyAction = null;
-      return next;
-    }
-  }
-
-  next.currentRound.activePlayerSlot = next.player.activeSlot;
-  next.currentRound.activeEnemySlot = next.enemy.activeSlot;
-
-  next.pendingPlayerAction = null;
-  next.pendingEnemyAction = null;
-  next.phase = "choose-actions";
-
-  return next;
 }
