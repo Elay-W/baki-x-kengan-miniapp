@@ -1,433 +1,475 @@
-import type { FighterCard, FighterType, Rarity } from "@/types/game";
+import type { FighterCard } from "@/types/game";
 
 export type ArenaClashSide = "player" | "enemy";
 
-export type ArenaClashCardState = "Ready" | "Pressured" | "Broken" | "KO";
+export type ArenaClashRow = "front" | "core" | "reserve";
+export type ArenaClashDeployRow = Exclude<ArenaClashRow, "reserve">;
+
+export type ArenaClashPhase =
+  | "deploy"
+  | "enemy-deploy"
+  | "command"
+  | "switch"
+  | "guard-charge"
+  | "strike"
+  | "burst"
+  | "break"
+  | "support"
+  | "finished";
 
 export type ArenaClashActionType =
   | "Strike"
+  | "Charge"
   | "Guard"
-  | "Skill"
+  | "Burst"
   | "Switch"
-  | "Charge";
+  | "Skill";
 
 export type ArenaClashSkillType =
+  | "Strike"
+  | "Charge"
+  | "Guard"
   | "Burst"
-  | "Pierce"
-  | "Counter"
-  | "Stance"
-  | "Control"
-  | "Utility";
+  | "Switch"
+  | "Passive"
+  | "Trigger";
 
-export type ArenaClashSkillWindow =
-  | "OnReveal"
-  | "BeforeClash"
-  | "OnSpeed"
-  | "OnEntry"
-  | "OnPower"
-  | "OnDefense"
-  | "OnReversal"
-  | "AfterWin"
-  | "AfterLoss";
+export type ArenaClashTargetRule =
+  | "self"
+  | "ally"
+  | "adjacent-ally"
+  | "front-enemy"
+  | "same-lane-enemy"
+  | "any-enemy"
+  | "broken-enemy"
+  | "entry-slot"
+  | "reserve-slot"
+  | "global";
 
-export type ArenaClashKind =
-  | "None"
-  | "SpeedClash"
-  | "EntryClash"
-  | "PowerClash"
-  | "ReversalClash"
-  | "SwitchCheck";
+export type ArenaClashRoleTag =
+  | "frontliner"
+  | "tank"
+  | "core-carry"
+  | "tempo"
+  | "counter"
+  | "bruiser"
+  | "controller"
+  | "switch-specialist"
+  | "support-friendly"
+  | "burst-carry";
 
-export type ArenaClashResultTier = "none" | "light" | "clean" | "crush";
+export type ArenaClashSupportTier = "standard" | "god-like";
+export type ArenaClashSupportCategory =
+  | "burst"
+  | "aura"
+  | "body-state"
+  | "tactical";
+
+export type ArenaClashPopupKind =
+  | "action"
+  | "result"
+  | "state"
+  | "special"
+  | "resource";
 
 export type ArenaClashStatusType =
-  | "Strain"
-  | "Bleed"
-  | "Shield"
-  | "Stun"
-  | "GuardBreak"
-  | "TempoDown";
+  | "Stagger"
+  | "GuardBoost"
+  | "TempoLock"
+  | "ForceBuff"
+  | "PressureBuff"
+  | "ReadBuff"
+  | "BreakResist"
+  | "DemonBack"
+  | "CannotBurst"
+  | "RecoveryLock";
 
-export type ArenaClashStatKey = keyof FighterCard["stats"];
+export type ArenaClashStatKey =
+  | "STR"
+  | "SPD"
+  | "TECH"
+  | "DUR"
+  | "DEF"
+  | "INSTINCT";
 
-export type ArenaClashStatBlock = FighterCard["stats"];
+export type ArenaClashStatBlock = Pick<
+  FighterCard["stats"],
+  "STR" | "SPD" | "TECH" | "DUR" | "DEF" | "INSTINCT"
+>;
 
-export type ArenaClashFighterCard = FighterCard & {
-  manualSkillKey?: string;
-  arenaClashSkillKey?: string;
-  tags?: string[];
+export type ArenaClashPopupDefinition = {
+  text: string;
+  kind: ArenaClashPopupKind;
+  color: string;
+  outline: string;
 };
 
-export type ArenaClashActionSelection = {
-  type: ArenaClashActionType;
-  skillKey?: string;
-  targetReserveSlot?: number;
+export type ArenaClashPopupEvent = {
+  id: string;
+  text: string;
+  kind: ArenaClashPopupKind;
+  color: string;
+  outline: string;
+  side?: ArenaClashSide;
+  slotId?: ActiveBoardSlotId | null;
+  sourceUnitUid?: string;
+  targetUnitUid?: string;
+  durationMs?: number;
 };
 
-export type ArenaClashStatusInstance = {
+export type ArenaClashRuntimeStatusInstance = {
+  id: string;
   type: ArenaClashStatusType;
-  durationExchanges: number;
-  stacks?: number;
-  sourceCardId?: number;
+  remainingRounds: number;
+  sourceId?: string;
+  notes?: string;
 };
 
 export type ArenaClashSkillDefinition = {
   key: string;
   name: string;
+  shortLabel: string;
   type: ArenaClashSkillType;
 
-  focusCost: number;
-  tempoCost?: number;
+  tempoCost: number;
+  forceCost?: number;
+  storedForceCost?: number;
 
-  cooldownExchanges?: number;
-  oncePerFielding?: boolean;
-  oncePerBattle?: boolean;
+  cooldownRounds: number;
+  oncePerMatch?: boolean;
 
-  allowedActions?: ArenaClashActionType[];
-  allowedWindows: ArenaClashSkillWindow[];
+  allowedRows: Array<ArenaClashRow | "any">;
+  targetRule: ArenaClashTargetRule;
 
-  target: "self" | "enemy" | "self_or_enemy";
-
-  modifiesClash?: ArenaClashKind[];
-
-  flatBonuses?: Partial<ArenaClashStatBlock>;
-
-  weightShift?: Partial<{
-    speedSPD: number;
-    speedINSTINCT: number;
-
-    entrySPD: number;
-    entryTECH: number;
-    entryINSTINCT: number;
-    entryDEF: number;
-
-    powerSTR: number;
-    powerTECH: number;
-    powerDEF: number;
-    powerDUR: number;
-
-    reversalTECH: number;
-    reversalINSTINCT: number;
-    reversalSTR: number;
-    reversalSPD: number;
-  }>;
-
-  ignoreDefensePercent?: number;
-  ignoreDurabilityPercent?: number;
-  ignoreInstinctPercent?: number;
-
-  applyStatusesToSelf?: ArenaClashStatusType[];
-  applyStatusesToEnemy?: ArenaClashStatusType[];
-
-  resultShift?: {
-    onWin?: -1 | 0 | 1;
-    onLose?: -1 | 0 | 1;
-  };
-
+  statScaling: Partial<Record<ArenaClashStatKey, number>>;
+  popupText: string;
   description: string;
+
+  keywords?: string[];
+  requiresBrokenTarget?: boolean;
+  requiresFrontline?: boolean;
+  onEntryOnly?: boolean;
+  onSwitchOnly?: boolean;
 };
 
-export type ArenaClashSkillRuntimeState = {
-  cooldowns: Record<string, number>;
-  usedThisFielding: Record<string, boolean>;
-  usedThisBattle: Record<string, boolean>;
+export type ArenaClashSupportSynergyModifier = {
+  strikePressurePct?: number;
+  burstPressurePct?: number;
+  guardValuePct?: number;
+  breakThresholdPct?: number;
+  readValueFlat?: number;
+  chargeGainPct?: number;
+  tempoCostReductionFlat?: number;
+  ignoreFirstBreak?: boolean;
 };
 
-export type ArenaClashCardFlags = {
-  isLead: boolean;
-  hasEnteredField: boolean;
-  switchedInThisRound: boolean;
-  knockedOutBySwitchPunish: boolean;
+export type ArenaClashSupportCard = {
+  id: string;
+  name: string;
+  tier: ArenaClashSupportTier;
+  category: ArenaClashSupportCategory;
+
+  storedForceCost: number;
+  roundGate?: number;
+  durationRounds?: number;
+  oncePerMatch?: boolean;
+
+  keywords?: string[];
+  popupText: string;
+  description: string;
+
+  baseModifiers?: ArenaClashSupportSynergyModifier;
+  synergyBySlug?: Record<string, ArenaClashSupportSynergyModifier>;
 };
 
-export type ArenaClashBattleCardRuntime = {
-  owner: ArenaClashSide;
-  slot: number;
-
-  card: ArenaClashFighterCard;
-  fighterType: FighterType;
-  rarity: Rarity;
-
-  state: ArenaClashCardState;
-  focus: number;
-
-  statuses: ArenaClashStatusInstance[];
-  skillState: ArenaClashSkillRuntimeState;
-
-  guardStreak: number;
-  chargeStreak: number;
-
-  flags: ArenaClashCardFlags;
+export type ArenaClashFighterProfile = {
+  fighterId: number;
+  slug: string;
+  roleTags: ArenaClashRoleTag[];
+  preferredRows: ArenaClashDeployRow[];
+  signatureSkillKey: string;
+  supportAffinityTags?: string[];
 };
+
+export const ARENA_CLASH_CONFIG = {
+  deckSize: 10,
+
+  frontSlots: 3,
+  coreSlots: 4,
+  reserveSlots: 3,
+  maxActiveBoardUnits: 7,
+
+  initialDeployCount: 5,
+  minFrontlineOnInitialDeploy: 1,
+
+  supportEquippedLimit: 2,
+  godLikeSupportLimit: 1,
+  supportActivationsPerRound: 1,
+
+  storedForceCap: 3,
+  teamSignatureLimitPerRound: 2,
+  teamSwitchLimitPerRound: 1,
+
+  switchStoredForceCost: 1,
+  switchRecoveryLockRounds: 1,
+  switchedInCannotBurstThisRound: true,
+
+  defaultSignatureCooldown: 2,
+  firstBreakStaggerRounds: 1,
+  breakTokensToEliminate: 2,
+} as const;
+
+export const ACTIVE_BOARD_SLOTS = [
+  { id: "front_left", row: "front", lane: 0, order: 0 },
+  { id: "front_center", row: "front", lane: 1, order: 1 },
+  { id: "front_right", row: "front", lane: 2, order: 2 },
+
+  { id: "core_left", row: "core", lane: 0, order: 3 },
+  { id: "core_center_left", row: "core", lane: 1, order: 4 },
+  { id: "core_center_right", row: "core", lane: 2, order: 5 },
+  { id: "core_right", row: "core", lane: 3, order: 6 },
+] as const;
+
+export type ActiveBoardSlotId = (typeof ACTIVE_BOARD_SLOTS)[number]["id"];
+
+export type ArenaClashRuntimeUnit = {
+  uid: string;
+  side: ArenaClashSide;
+  slotId: ActiveBoardSlotId | null;
+  inReserve: boolean;
+
+  fighterId: number;
+  cardName: string;
+  cardTitle: string;
+  cardSlug: string;
+  rarity: FighterCard["rarity"];
+  stars: FighterCard["stars"];
+  series?: "Baki" | "Kengan";
+
+  stats: ArenaClashStatBlock;
+
+  roleTags: ArenaClashRoleTag[];
+  preferredRows: ArenaClashDeployRow[];
+  signatureSkillKey: string;
+  supportAffinityTags?: string[];
+
+  force: number;
+  forceCap: number;
+
+  tempo: number;
+  tempoCap: number;
+
+  breakMeter: number;
+  breakTokens: number;
+
+  eliminated: boolean;
+  staggerRoundsLeft: number;
+  recoveryLockRounds: number;
+  enteredThisRound: boolean;
+
+  lastAction: ArenaClashActionType | null;
+  lastPopup?: ArenaClashPopupDefinition | null;
+
+  skillCooldownLeft: number;
+  skillUsedThisMatch: boolean;
+
+  statusEffects: ArenaClashRuntimeStatusInstance[];
+};
+
+export type ArenaClashBoardState = Partial<
+  Record<ActiveBoardSlotId, ArenaClashRuntimeUnit>
+>;
 
 export type ArenaClashTeamState = {
   side: ArenaClashSide;
-  tempo: number;
-  activeSlot: number;
-  fighters: ArenaClashBattleCardRuntime[];
+
+  active: ArenaClashBoardState;
+  reserve: ArenaClashRuntimeUnit[];
+
+  storedForce: number;
+
+  supportLoadout: ArenaClashSupportCard[];
+
+  switchesUsedThisRound: number;
+  signaturesUsedThisRound: number;
+  supportsUsedThisRound: number;
 };
 
-export type ArenaClashPhase =
-  | "setup"
-  | "versus"
-  | "choose-actions"
-  | "resolve-exchange"
-  | "round-end"
-  | "match-end";
-
-export type ArenaClashSnapshot = {
-  kind: ArenaClashKind;
-  attackerSide: ArenaClashSide;
-  defenderSide: ArenaClashSide;
-  attackerValue: number;
-  defenderValue: number;
-  difference: number;
-  winnerSide: ArenaClashSide | "draw";
+export type ArenaClashQueuedCommand = {
+  unitUid: string;
+  action: ArenaClashActionType;
+  targetSlotId?: ActiveBoardSlotId;
+  targetUnitUid?: string;
+  chosenReserveUid?: string;
+  chosenSupportId?: string;
+  useSignature?: boolean;
 };
 
-export type ArenaClashStateTransition = {
-  side: ArenaClashSide;
-  slot: number;
-  from: ArenaClashCardState;
-  to: ArenaClashCardState;
-};
-
-export type ArenaClashStatusApplication = {
-  side: ArenaClashSide;
-  slot: number;
-  status: ArenaClashStatusType;
-  applied: boolean;
-};
-
-export type ArenaClashExchangeResolution = {
-  exchangeNumber: number;
-
-  playerAction: ArenaClashActionSelection;
-  enemyAction: ArenaClashActionSelection;
-
-  primaryClash: ArenaClashKind;
-  secondaryClash?: ArenaClashKind;
-
-  resultTier: ArenaClashResultTier;
-  winnerSide: ArenaClashSide | "draw" | "none";
-
-  clashes: ArenaClashSnapshot[];
-  stateTransitions: ArenaClashStateTransition[];
-  statusApplications: ArenaClashStatusApplication[];
-
-  focusChanges: {
-    player: number;
-    enemy: number;
-  };
-
-  tempoChanges: {
-    player: number;
-    enemy: number;
-  };
-
-  koOccurred: boolean;
-  roundEnded: boolean;
-  logs: string[];
-};
-
-export type ArenaClashRoundState = {
-  roundNumber: number;
-  startedAtExchange: number;
-  activePlayerSlot: number;
-  activeEnemySlot: number;
-};
-
-export type ArenaClashBattleResult = {
-  winner: ArenaClashSide | null;
-  loser: ArenaClashSide | null;
-  reason:
-    | "all_ko"
-    | "no_tempo_to_field"
-    | "surrender"
-    | "unfinished";
-};
+export type ArenaClashFinishedReason =
+  | "all_eliminated"
+  | "collapse"
+  | "surrender"
+  | "unfinished";
 
 export type ArenaClashMatchState = {
   mode: "arena-clash";
 
   phase: ArenaClashPhase;
+  roundNumber: number;
 
   player: ArenaClashTeamState;
   enemy: ArenaClashTeamState;
 
-  currentRound: ArenaClashRoundState;
-  exchangeNumber: number;
+  queuedPlayerCommands: ArenaClashQueuedCommand[];
+  queuedEnemyCommands: ArenaClashQueuedCommand[];
 
-  pendingPlayerAction: ArenaClashActionSelection | null;
-  pendingEnemyAction: ArenaClashActionSelection | null;
-
-  lastResolution: ArenaClashExchangeResolution | null;
-  result: ArenaClashBattleResult | null;
+  winner: ArenaClashSide | null;
+  loser: ArenaClashSide | null;
+  finishedReason: ArenaClashFinishedReason;
 
   battleLog: string[];
+  popupQueue: ArenaClashPopupEvent[];
 };
 
-export const ARENA_CLASH_MAX_TEMPO = 5;
-export const ARENA_CLASH_STARTING_TEMPO = 2;
-export const ARENA_CLASH_TEMPO_PER_NEW_ROUND = 1;
+export type ArenaClashStoredSetup = {
+  fighterDeckIds: number[];
+  supportIds: string[];
+  godLikeSupportId: string | null;
 
-export const ARENA_CLASH_MAX_FOCUS = 4;
-export const ARENA_CLASH_STARTING_FOCUS = 1;
+  enemyDeckIds?: number[] | null;
 
-export const ARENA_CLASH_GUARD_BONUS = {
-  DEF: 12,
-  DUR: 8,
-  INSTINCT: 4,
-} as const;
-
-export const ARENA_CLASH_CHARGE_PENALTY = {
-  DEF: -8,
-  SPD: -6,
-} as const;
-
-export const ARENA_CLASH_PRESSURED_PENALTY = {
-  SPD: -6,
-  DEF: -6,
-} as const;
-
-export const ARENA_CLASH_BROKEN_PENALTY = {
-  SPD: -10,
-  DEF: -8,
-} as const;
-
-export const ARENA_CLASH_STRAIN_PENALTY = {
-  STR: -6,
-  DEF: -6,
-} as const;
-
-export const ARENA_CLASH_TEMPO_COST_BY_RARITY: Record<Rarity, number> = {
-  Common: 1,
-  Uncommon: 1,
-  Rare: 1,
-  Epic: 2,
-  Elite: 2,
-  Legendary: 3,
-  "God-like": 4,
-  Divine: 4,
+  savedAt: number;
+  version: 2;
 };
 
-export const ARENA_CLASH_RESULT_TIER_ORDER: ArenaClashResultTier[] = [
-  "none",
-  "light",
-  "clean",
-  "crush",
-];
+export type ArenaClashStoredRuntimeState = {
+  state: ArenaClashMatchState;
+  savedAt: number;
+  version: 2;
+};
 
-export function getArenaClashTempoCostByRarity(rarity: Rarity): number {
-  return ARENA_CLASH_TEMPO_COST_BY_RARITY[rarity];
-}
-
-export function getArenaClashNextStateAfterTier(
-  currentState: ArenaClashCardState,
-  resultTier: ArenaClashResultTier,
-): ArenaClashCardState {
-  if (currentState === "KO" || resultTier === "none") {
-    return currentState;
-  }
-
-  const steps =
-    resultTier === "light" ? 1 : resultTier === "clean" ? 2 : 2;
-
-  const stateOrder: ArenaClashCardState[] = ["Ready", "Pressured", "Broken", "KO"];
-  const currentIndex = stateOrder.indexOf(currentState);
-
-  if (currentIndex < 0) {
-    return currentState;
-  }
-
-  if (resultTier === "crush") {
-    if (currentState === "Ready") {
-      return "Broken";
-    }
-
-    return "KO";
-  }
-
-  const nextIndex = Math.min(currentIndex + steps, stateOrder.length - 1);
-  return stateOrder[nextIndex];
-}
-
-export function clampArenaClashFocus(value: number): number {
-  return Math.max(0, Math.min(ARENA_CLASH_MAX_FOCUS, value));
-}
-
-export function clampArenaClashTempo(value: number): number {
-  return Math.max(0, Math.min(ARENA_CLASH_MAX_TEMPO, value));
-}
-
-export function isArenaClashCardActive(
-  card: ArenaClashBattleCardRuntime,
-  team: ArenaClashTeamState,
-): boolean {
-  return team.fighters[team.activeSlot]?.card.id === card.card.id;
-}
-
-export function isArenaClashCardKO(card: ArenaClashBattleCardRuntime): boolean {
-  return card.state === "KO";
-}
-
-export function canArenaClashCardStillFight(
-  card: ArenaClashBattleCardRuntime,
-): boolean {
-  return card.state !== "KO";
-}
-
-export function getArenaClashActiveCard(
-  team: ArenaClashTeamState,
-): ArenaClashBattleCardRuntime {
-  return team.fighters[team.activeSlot];
-}
-
-export function createArenaClashEmptySkillRuntimeState(): ArenaClashSkillRuntimeState {
-  return {
-    cooldowns: {},
-    usedThisFielding: {},
-    usedThisBattle: {},
-  };
-}
-
-export function createArenaClashRuntimeCard(
-  card: ArenaClashFighterCard,
-  owner: ArenaClashSide,
-  slot: number,
-  isLead = false,
-): ArenaClashBattleCardRuntime {
-  return {
-    owner,
-    slot,
-    card,
-    fighterType: card.type,
-    rarity: card.rarity,
-    state: "Ready",
-    focus: ARENA_CLASH_STARTING_FOCUS,
-    statuses: [],
-    skillState: createArenaClashEmptySkillRuntimeState(),
-    guardStreak: 0,
-    chargeStreak: 0,
-    flags: {
-      isLead,
-      hasEnteredField: isLead,
-      switchedInThisRound: false,
-      knockedOutBySwitchPunish: false,
+export const ARENA_POPUPS = {
+  action: {
+    strike: {
+      text: "STRIKE!",
+      kind: "action",
+      color: "#ff745c",
+      outline: "#2b0c08",
     },
-  };
-}
+    charge: {
+      text: "CHARGE!",
+      kind: "action",
+      color: "#ffb558",
+      outline: "#2a1705",
+    },
+    guard: {
+      text: "GUARD!",
+      kind: "action",
+      color: "#64cbff",
+      outline: "#06192b",
+    },
+    burst: {
+      text: "BURST!",
+      kind: "action",
+      color: "#d07cff",
+      outline: "#22062b",
+    },
+    switch: {
+      text: "SWITCH!",
+      kind: "action",
+      color: "#7affd4",
+      outline: "#072822",
+    },
+    skill: {
+      text: "SKILL!",
+      kind: "special",
+      color: "#ffd76b",
+      outline: "#2a1e05",
+    },
+  },
+  result: {
+    block: {
+      text: "BLOCK",
+      kind: "result",
+      color: "#63c7ff",
+      outline: "#06182a",
+    },
+    read: {
+      text: "READ!",
+      kind: "result",
+      color: "#b58cff",
+      outline: "#18062a",
+    },
+    entry: {
+      text: "ENTRY",
+      kind: "result",
+      color: "#7affd4",
+      outline: "#072822",
+    },
+    intercept: {
+      text: "INTERCEPT",
+      kind: "result",
+      color: "#63ffd0",
+      outline: "#07231d",
+    },
+    pressure: {
+      text: "PRESSURE",
+      kind: "result",
+      color: "#ff8759",
+      outline: "#2b1008",
+    },
+  },
+  state: {
+    break: {
+      text: "BREAK!",
+      kind: "state",
+      color: "#ff5454",
+      outline: "#2a0505",
+    },
+    stagger: {
+      text: "STAGGER",
+      kind: "state",
+      color: "#ff8d66",
+      outline: "#2a1108",
+    },
+    frontDown: {
+      text: "FRONT DOWN",
+      kind: "state",
+      color: "#ff5f6b",
+      outline: "#2a0508",
+    },
+    coreOpen: {
+      text: "CORE OPEN",
+      kind: "state",
+      color: "#ffb25f",
+      outline: "#2a1705",
+    },
+  },
+  special: {
+    demonBack: {
+      text: "DEMON BACK",
+      kind: "special",
+      color: "#ff9d50",
+      outline: "#2b0f05",
+    },
+    godLike: {
+      text: "GOD-LIKE",
+      kind: "special",
+      color: "#ffd86d",
+      outline: "#2a1d05",
+    },
+  },
+} as const;
 
-export function createArenaClashTeamState(
-  side: ArenaClashSide,
-  cards: ArenaClashFighterCard[],
-): ArenaClashTeamState {
-  return {
-    side,
-    tempo: ARENA_CLASH_STARTING_TEMPO,
-    activeSlot: 0,
-    fighters: cards.map((card, index) =>
-      createArenaClashRuntimeCard(card, side, index, index === 0),
-    ),
-  };
-}
+export const ARENA_CLASH_NOTES = {
+  combatIdentity:
+    "Arena Clash has no HP. Fighters are broken by pressure, destabilized by read disadvantage, and eliminated through repeated Break states.",
+  eliminationRule:
+    "A fighter receives Break Tokens when their Break Meter overflows. First Break = stagger and vulnerability. Second Break = elimination.",
+  switchRule:
+    "One team-wide Switch per round. Costs 1 Stored Force. Switched-in fighter gets entry bonuses but cannot Burst immediately.",
+  supportRule:
+    "Each team equips 2 support cards max, including at most 1 God-like card. Only 1 support activation per round.",
+  signatureRule:
+    "Signature skills spend Tempo, may optionally spend Force, and are capped by cooldown plus team-wide per-round signature limits.",
+} as const;

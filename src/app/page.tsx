@@ -1,185 +1,423 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import Link from "next/link";
+import { useEffect, useMemo, useState } from "react";
+
 import PageShell from "@/components/PageShell";
-import SplashScreen from "@/components/SplashScreen";
-import { glassCard, secondaryButton } from "@/components/ui";
-import { useRouter } from "next/navigation";
+import { glassCard, primaryButton, secondaryButton, rarityColors } from "@/components/ui";
 import { loadDeck } from "@/lib/deckStorage";
-import { getWalletCoins } from "@/lib/walletStorage";
-import { getOwnedCardsDetailed, seedStarterCollection } from "@/lib/collectionStorage";
+import type { FighterCard } from "@/types/game";
 
-export default function HomePage() {
-  const router = useRouter();
-  const [loading, setLoading] = useState(true);
-  const [progress, setProgress] = useState(8);
-  const [coins, setCoins] = useState(500);
-  const [ownedCount, setOwnedCount] = useState(0);
-  const [activeDeck, setActiveDeck] = useState<string[]>([
-    "Yujiro Hanma",
-    "Baki Hanma",
-    "Tokita Ohma",
-  ]);
-
-  useEffect(() => {
-    seedStarterCollection();
-
-    const interval = setInterval(() => {
-      setProgress((prev) => (prev >= 100 ? 100 : Math.min(prev + 7, 100)));
-    }, 120);
-
-    const timeout = setTimeout(() => {
-      setProgress(100);
-      setLoading(false);
-    }, 1800);
-
-    return () => {
-      clearInterval(interval);
-      clearTimeout(timeout);
-    };
-  }, []);
-
-  useEffect(() => {
-    const storedDeck = loadDeck();
-    if (storedDeck.length > 0) {
-      setActiveDeck(storedDeck.map((card) => card.name));
-    }
-
-    setCoins(getWalletCoins());
-    setOwnedCount(getOwnedCardsDetailed().length);
-  }, []);
-
+function ActionTile({
+  title,
+  subtitle,
+  href,
+  badge,
+}: {
+  title: string;
+  subtitle: string;
+  href: string;
+  badge?: string;
+}) {
   return (
-    <>
-      {loading && <SplashScreen progress={progress} />}
+    <Link
+      href={href}
+      style={{
+        ...glassCard(),
+        padding: 16,
+        display: "grid",
+        gap: 10,
+        minHeight: 132,
+        textDecoration: "none",
+        color: "#fff",
+        border: "1px solid rgba(255,255,255,0.08)",
+        background: "rgba(10,10,14,0.68)",
+        backdropFilter: "blur(12px)",
+      }}
+    >
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          gap: 10,
+          alignItems: "start",
+        }}
+      >
+        <div
+          style={{
+            fontSize: 12,
+            fontWeight: 900,
+            letterSpacing: "0.12em",
+            textTransform: "uppercase",
+            opacity: 0.6,
+          }}
+        >
+          {title}
+        </div>
 
-      {!loading && (
-        <PageShell>
+        {badge && (
           <div
             style={{
-              marginBottom: 20,
-              display: "flex",
-              justifyContent: "space-between",
-              gap: 12,
-              alignItems: "flex-start",
+              padding: "6px 10px",
+              borderRadius: 999,
+              fontSize: 11,
+              fontWeight: 800,
+              background: "rgba(255,255,255,0.05)",
+              border: "1px solid rgba(255,255,255,0.08)",
+              whiteSpace: "nowrap",
             }}
           >
-            <div>
-              <div style={{ fontSize: 34, fontWeight: 700, lineHeight: 1.05 }}>
-                Baki X Kengan
-              </div>
-              <div
-                style={{
-                  marginTop: 10,
-                  fontSize: 16,
-                  color: "#a1a1aa",
-                  lineHeight: 1.5,
-                }}
-              >
-                Collect fighter cards, build your deck, and dominate the arena.
-              </div>
+            {badge}
+          </div>
+        )}
+      </div>
+
+      <div
+        style={{
+          fontSize: 14,
+          lineHeight: 1.45,
+          opacity: 0.76,
+        }}
+      >
+        {subtitle}
+      </div>
+    </Link>
+  );
+}
+
+function MiniDeckCard({ card }: { card: FighterCard }) {
+  const rarity = rarityColors(card.rarity);
+
+  return (
+    <div
+      style={{
+        ...glassCard(),
+        padding: 12,
+        display: "grid",
+        gap: 6,
+        border: `1px solid ${rarity.border}`,
+        background: "rgba(10,10,14,0.72)",
+        backdropFilter: "blur(12px)",
+        minHeight: 96,
+      }}
+    >
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          gap: 8,
+          alignItems: "start",
+        }}
+      >
+        <div
+          style={{
+            fontSize: 14,
+            fontWeight: 900,
+            lineHeight: 1.1,
+          }}
+        >
+          {card.name}
+        </div>
+
+        <div
+          style={{
+            fontSize: 11,
+            fontWeight: 800,
+            color: rarity.text,
+            whiteSpace: "nowrap",
+          }}
+        >
+          {card.stars}★
+        </div>
+      </div>
+
+      <div
+        style={{
+          fontSize: 12,
+          opacity: 0.72,
+          lineHeight: 1.3,
+        }}
+      >
+        {card.title}
+      </div>
+
+      <div
+        style={{
+          fontSize: 11,
+          opacity: 0.62,
+        }}
+      >
+        {card.rarity}
+      </div>
+    </div>
+  );
+}
+
+export default function HomePage() {
+  const [deck, setDeck] = useState<FighterCard[]>([]);
+  const [isHydrated, setIsHydrated] = useState(false);
+
+  useEffect(() => {
+    setDeck(loadDeck());
+    setIsHydrated(true);
+  }, []);
+
+  const deckPreview = useMemo(() => deck.slice(0, 3), [deck]);
+
+  return (
+    <PageShell
+      playerName="Underground Fighter"
+      yen={24500}
+      tokens={180}
+      backgroundImageSrc="/backgrounds/home-menu-bg.jpg"
+      backgroundOverlay="linear-gradient(180deg, rgba(4,5,8,0.56) 0%, rgba(4,5,8,0.48) 22%, rgba(4,5,8,0.62) 50%, rgba(4,5,8,0.84) 100%)"
+    >
+      <section
+        style={{
+          ...glassCard(),
+          padding: 18,
+          display: "grid",
+          gap: 14,
+          border: "1px solid rgba(255,255,255,0.08)",
+          background: "rgba(8,8,12,0.58)",
+          backdropFilter: "blur(14px)",
+        }}
+      >
+        <div
+          style={{
+            display: "grid",
+            gap: 6,
+          }}
+        >
+          <div
+            style={{
+              fontSize: 12,
+              fontWeight: 900,
+              letterSpacing: "0.14em",
+              textTransform: "uppercase",
+              opacity: 0.6,
+            }}
+          >
+            Baki × Kengan
+          </div>
+
+          <div
+            style={{
+              fontSize: 34,
+              fontWeight: 900,
+              lineHeight: 0.96,
+            }}
+          >
+            Enter the Arena
+          </div>
+
+          <div
+            style={{
+              fontSize: 14,
+              lineHeight: 1.45,
+              opacity: 0.78,
+              maxWidth: 360,
+            }}
+          >
+            Build your fighters, open packs, and dominate the underground scene.
+          </div>
+        </div>
+
+        <div
+          style={{
+            display: "flex",
+            gap: 10,
+            flexWrap: "wrap",
+          }}
+        >
+          <Link href="/battle" style={primaryButton()}>
+            Start Battle
+          </Link>
+
+          <Link href="/collection" style={secondaryButton()}>
+            Open Collection
+          </Link>
+        </div>
+      </section>
+
+      <section
+        style={{
+          ...glassCard(),
+          padding: 16,
+          display: "grid",
+          gap: 14,
+          border: "1px solid rgba(255,255,255,0.08)",
+          background: "rgba(8,8,12,0.6)",
+          backdropFilter: "blur(14px)",
+        }}
+      >
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            gap: 12,
+            alignItems: "center",
+            flexWrap: "wrap",
+          }}
+        >
+          <div>
+            <div
+              style={{
+                fontSize: 12,
+                fontWeight: 900,
+                letterSpacing: "0.14em",
+                textTransform: "uppercase",
+                opacity: 0.6,
+              }}
+            >
+              Main Team
             </div>
-
-            <div style={{ display: "grid", gap: 10 }}>
-              <div
-                style={{
-                  padding: "12px 14px",
-                  borderRadius: 18,
-                  border: "1px solid rgba(255,255,255,0.10)",
-                  background: "rgba(255,255,255,0.04)",
-                  color: "#fef08a",
-                  fontWeight: 700,
-                  fontSize: 14,
-                  textAlign: "center",
-                  minWidth: 110,
-                }}
-              >
-                {coins} Coins
-              </div>
-
-              <button style={secondaryButton()} onClick={() => router.push("/profile")}>
-                Profile
-              </button>
+            <div
+              style={{
+                fontSize: 22,
+                fontWeight: 900,
+              }}
+            >
+              Saved Arena Deck
             </div>
           </div>
 
-          <div style={{ ...glassCard(), padding: 20, marginBottom: 16 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
-              <div>
-                <div style={{ fontSize: 13, color: "#a1a1aa" }}>Current deck</div>
-                <div style={{ marginTop: 6, fontSize: 28, fontWeight: 700 }}>
-                  Main Arena Deck
-                </div>
-              </div>
+          <Link href="/deck" style={secondaryButton()}>
+            Manage Deck
+          </Link>
+        </div>
 
-              <button style={secondaryButton()} onClick={() => router.push("/deck")}>
-                Open
-              </button>
-            </div>
-
-            <div style={{ marginTop: 16, display: "flex", flexWrap: "wrap", gap: 8 }}>
-              {activeDeck.length > 0 ? (
-                activeDeck.map((name) => (
-                  <span
-                    key={name}
-                    style={{
-                      padding: "8px 12px",
-                      borderRadius: 999,
-                      border: "1px solid rgba(255,255,255,0.10)",
-                      background: "rgba(255,255,255,0.04)",
-                      fontSize: 12,
-                      color: "#d4d4d8",
-                    }}
-                  >
-                    {name}
-                  </span>
-                ))
-              ) : (
-                <span style={{ fontSize: 13, color: "#71717a" }}>No saved deck yet</span>
-              )}
-            </div>
-          </div>
-
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-            {[
-              ["Collection", `Owned fighters: ${ownedCount}`, "/collection"],
-              ["Decks", "Manage your battle-ready builds", "/deck"],
-              ["Battle", "Choose a mode and enter the arena", "/battle"],
-              ["Shop", "Open packs and get new cards", "/shop"],
-            ].map(([title, subtitle, href]) => (
-              <button
-                key={title}
-                onClick={() => router.push(href)}
-                style={{
-                  ...glassCard(),
-                  padding: 18,
-                  textAlign: "left",
-                  cursor: "pointer",
-                }}
-              >
-                <div style={{ fontSize: 18, fontWeight: 700 }}>{title}</div>
-                <div
-                  style={{
-                    marginTop: 8,
-                    fontSize: 14,
-                    color: "#a1a1aa",
-                    lineHeight: 1.45,
-                  }}
-                >
-                  {subtitle}
-                </div>
-              </button>
+        {isHydrated && deck.length > 0 ? (
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+              gap: 10,
+            }}
+          >
+            {deckPreview.map((card) => (
+              <MiniDeckCard key={card.id} card={card} />
             ))}
           </div>
-
-          <div style={{ ...glassCard(), padding: 20, marginTop: 16 }}>
-            <div style={{ fontSize: 13, color: "#a1a1aa" }}>Daily focus</div>
-            <div style={{ marginTop: 8, fontSize: 16, fontWeight: 600, lineHeight: 1.5 }}>
-              Win 3 battles • Open 1 pack • Add 1 card to favourites
-            </div>
+        ) : (
+          <div
+            style={{
+              borderRadius: 18,
+              padding: 14,
+              background: "rgba(255,255,255,0.04)",
+              border: "1px solid rgba(255,255,255,0.06)",
+              fontSize: 14,
+              opacity: 0.74,
+              lineHeight: 1.45,
+            }}
+          >
+            {isHydrated
+              ? "No saved deck yet. Go to Deck and build a 5-card team."
+              : "Loading your saved deck from local storage."}
           </div>
-        </PageShell>
-      )}
-    </>
+        )}
+
+        <div
+          style={{
+            display: "flex",
+            gap: 8,
+            flexWrap: "wrap",
+          }}
+        >
+          {isHydrated &&
+            deck.slice(0, 5).map((card) => (
+              <div
+                key={`chip-${card.id}`}
+                style={{
+                  padding: "7px 10px",
+                  borderRadius: 999,
+                  background: "rgba(255,255,255,0.05)",
+                  border: "1px solid rgba(255,255,255,0.08)",
+                  fontSize: 12,
+                  fontWeight: 700,
+                }}
+              >
+                {card.name}
+              </div>
+            ))}
+        </div>
+      </section>
+
+      <section
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+          gap: 12,
+        }}
+      >
+        <ActionTile
+          title="Collection"
+          subtitle="Browse owned fighters and inspect cards."
+          href="/collection"
+        />
+        <ActionTile
+          title="Deck"
+          subtitle="Build your main lineup and prepare for battle."
+          href="/deck"
+        />
+        <ActionTile
+          title="Battle"
+          subtitle="Choose between Auto Arena and Arena Clash."
+          href="/battle"
+          badge="Live"
+        />
+        <ActionTile
+          title="Shop"
+          subtitle="Open packs, spend Yen, and chase rare drops."
+          href="/shop"
+          badge="New"
+        />
+      </section>
+
+      <section
+        style={{
+          ...glassCard(),
+          padding: 16,
+          display: "grid",
+          gap: 10,
+          border: "1px solid rgba(255,255,255,0.08)",
+          background: "rgba(8,8,12,0.6)",
+          backdropFilter: "blur(14px)",
+        }}
+      >
+        <div
+          style={{
+            fontSize: 12,
+            fontWeight: 900,
+            letterSpacing: "0.14em",
+            textTransform: "uppercase",
+            opacity: 0.6,
+          }}
+        >
+          Daily Focus
+        </div>
+
+        <div
+          style={{
+            fontSize: 22,
+            fontWeight: 900,
+            lineHeight: 1.15,
+          }}
+        >
+          Win 3 battles • Open 1 pack • Add 1 card to favorites
+        </div>
+
+        <div
+          style={{
+            fontSize: 14,
+            lineHeight: 1.45,
+            opacity: 0.74,
+          }}
+        >
+          Keep the main screen fast, readable, and action-first. More progression widgets
+          can be added later without turning this page into a long scroll.
+        </div>
+      </section>
+    </PageShell>
   );
 }

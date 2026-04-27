@@ -1,1619 +1,1289 @@
 import {
-  ARENA_CLASH_BROKEN_PENALTY,
-  ARENA_CLASH_CHARGE_PENALTY,
-  ARENA_CLASH_GUARD_BONUS,
-  ARENA_CLASH_PRESSURED_PENALTY,
-  ARENA_CLASH_STRAIN_PENALTY,
-  clampArenaClashFocus,
-  getArenaClashActiveCard,
-  getArenaClashNextStateAfterTier,
-  getArenaClashTempoCostByRarity,
-  isArenaClashCardKO,
-  type ArenaClashActionSelection,
-  type ArenaClashBattleCardRuntime,
-  type ArenaClashExchangeResolution,
-  type ArenaClashKind,
-  type ArenaClashResultTier,
-  type ArenaClashSide,
-  type ArenaClashSkillDefinition,
-  type ArenaClashSnapshot,
-  type ArenaClashStateTransition,
-  type ArenaClashStatBlock,
-  type ArenaClashStatusApplication,
-  type ArenaClashStatusType,
-  type ArenaClashTeamState,
+  getArenaClashSkill,
+  getArenaClashSupport,
+} from "@/lib/arenaClashSkillRegistry";
+import {
+  ACTIVE_BOARD_SLOTS,
+  ARENA_CLASH_CONFIG,
+  ARENA_POPUPS,
+} from "@/lib/arenaClashTypes";
+import type {
+  ActiveBoardSlotId,
+  ArenaClashActionType,
+  ArenaClashDeployRow,
+  ArenaClashMatchState,
+  ArenaClashPhase,
+  ArenaClashQueuedCommand,
+  ArenaClashRow,
+  ArenaClashRuntimeStatusInstance,
+  ArenaClashRuntimeUnit,
+  ArenaClashSide,
+  ArenaClashSkillDefinition,
+  ArenaClashTeamState,
 } from "@/lib/arenaClashTypes";
 import {
-  getArenaClashSkill,
-  resolveArenaClashSkillKey,
-} from "@/lib/arenaClashSkillRegistry";
+  addStatus,
+  applyPressureToBreakMeter,
+  applyTeamStoredForceDelta,
+  applyUnitForceDelta,
+  applyUnitTempoDelta,
+  canBurstThisRound,
+  canUseSignatureSkill,
+  canUseSupport,
+  canUseSwitch,
+  clamp,
+  cloneMatchState,
+  countLivingUnits,
+  createArenaPopupEvent,
+  createPopupFromDefinition,
+  findFirstEmptyPreferredSlot,
+  getBreakThreshold,
+  getChargeForceGain,
+  getChargeTempoGain,
+  getEffectivePressure,
+  getLivingActiveUnits,
+  getOpponentTeam,
+  getReadValue,
+  getSlotMeta,
+  getSwitchEntryBonuses,
+  getTeam,
+  getUnitAtSlot,
+  getUnitsInSlotOrder,
+  hasLivingCore,
+  hasLivingFrontline,
+  hasStatus,
+  isFrontSlot,
+  markSkillUsage,
+  moveActiveUnitToReserve,
+  moveReserveUnitToSlot,
+  removeEliminatedFromReserve,
+  resetTeamRoundCounters,
+  round,
+  setUnitLastAction,
+  setUnitLastPopup,
+  spendTeamStoredForce,
+  tickTeamForNewRound,
+} from "@/lib/arenaClashEngine";
 
-type ArenaClashResolverInput = {
-  playerTeam: ArenaClashTeamState;
-  enemyTeam: ArenaClashTeamState;
-  playerAction: ArenaClashActionSelection;
-  enemyAction: ArenaClashActionSelection;
-  exchangeNumber: number;
-};
-
-type NormalizedArenaClashAction = {
-  side: ArenaClashSide;
-  action: ArenaClashActionSelection;
+type ResolvedCommand = {
+  unit: ArenaClashRuntimeUnit;
+  command: ArenaClashQueuedCommand;
   skill: ArenaClashSkillDefinition | null;
-  logs: string[];
+  side: ArenaClashSide;
 };
 
-type ArenaClashStatContext = {
-  actor: ArenaClashBattleCardRuntime;
-  actorAction: ArenaClashActionSelection;
-  actorSkill: ArenaClashSkillDefinition | null;
-  clashKind: ArenaClashKind;
-  isAttacker: boolean;
-  actorSide: ArenaClashSide;
-  enemyAction?: ArenaClashActionSelection;
-  actorGuardBonus?: boolean;
-};
-
-const EPSILON = 0.0001;
-
-function round2(value: number): number {
-  return Math.round(value * 100) / 100;
+function getCurrentRow(unit: ArenaClashRuntimeUnit): ArenaClashRow {
+  if (unit.inReserve || !unit.slotId) return "reserve";
+  return getSlotMeta(unit.slotId).row;
 }
 
-function hasStatus(
-  card: ArenaClashBattleCardRuntime,
-  status: ArenaClashStatusType,
-): boolean {
-  return card.statuses.some((s) => s.type === status && s.durationExchanges > 0);
+function findUnitByUid(
+  team: ArenaClashTeamState,
+  uid: string,
+): ArenaClashRuntimeUnit | null {
+  for (const unit of getUnitsInSlotOrder(team)) {
+    if (unit.uid === uid) return unit;
+  }
+
+  for (const unit of team.reserve) {
+    if (unit.uid === uid) return unit;
+  }
+
+  return null;
 }
 
-function pushUniqueStatus(
-  list: ArenaClashStatusApplication[],
+function getQueuedCommandForUnit(
+  commands: ArenaClashQueuedCommand[],
+  unitUid: string,
+): ArenaClashQueuedCommand | null {
+  return commands.find((command) => command.unitUid === unitUid) ?? null;
+}
+
+function getDefaultActionForUnit(unit: ArenaClashRuntimeUnit): ArenaClashActionType {
+  if (unit.staggerRoundsLeft > 0) return "Guard";
+  if (unit.breakMeter >= 70 && getCurrentRow(unit) === "front") return "Guard";
+  if (unit.force <= 8 || unit.tempo <= 15) return "Charge";
+  if (unit.tempo >= 55 && canBurstThisRound(unit)) return "Burst";
+  return "Strike";
+}
+
+function createFallbackCommand(
+  unit: ArenaClashRuntimeUnit,
+): ArenaClashQueuedCommand {
+  return {
+    unitUid: unit.uid,
+    action: getDefaultActionForUnit(unit),
+  };
+}
+
+function getResolvedCommandsForSide(
+  state: ArenaClashMatchState,
   side: ArenaClashSide,
-  slot: number,
-  status: ArenaClashStatusType,
-) {
-  const exists = list.some(
-    (entry) => entry.side === side && entry.slot === slot && entry.status === status,
+): ResolvedCommand[] {
+  const team = getTeam(state, side);
+  const sourceCommands =
+    side === "player" ? state.queuedPlayerCommands : state.queuedEnemyCommands;
+
+  return getLivingActiveUnits(team).map((unit) => {
+    const command = getQueuedCommandForUnit(sourceCommands, unit.uid) ?? createFallbackCommand(unit);
+    const skill =
+      command.useSignature || command.action === "Skill"
+        ? getArenaClashSkill(unit.signatureSkillKey)
+        : null;
+
+    return {
+      unit,
+      command,
+      skill,
+      side,
+    };
+  });
+}
+
+function getInitiativeScore(unit: ArenaClashRuntimeUnit): number {
+  return round(
+    unit.stats.SPD * 0.44 +
+      unit.stats.INSTINCT * 0.34 +
+      unit.stats.TECH * 0.22 +
+      unit.tempo * 0.35,
+  );
+}
+
+function sortResolvedCommandsByInitiative(
+  items: ResolvedCommand[],
+): ResolvedCommand[] {
+  return [...items].sort((a, b) => getInitiativeScore(b.unit) - getInitiativeScore(a.unit));
+}
+
+function countActiveUnits(team: ArenaClashTeamState): number {
+  return getUnitsInSlotOrder(team).length;
+}
+
+function countFrontlineUnits(team: ArenaClashTeamState): number {
+  return ACTIVE_BOARD_SLOTS.filter((slot) => slot.row === "front").filter(
+    (slot) => Boolean(team.active[slot.id] && !team.active[slot.id]?.eliminated),
+  ).length;
+}
+
+function getLivingEnemySlots(team: ArenaClashTeamState): ActiveBoardSlotId[] {
+  return ACTIVE_BOARD_SLOTS.map((slot) => slot.id).filter((slotId) => {
+    const unit = team.active[slotId];
+    return Boolean(unit && !unit.eliminated);
+  });
+}
+
+function getLivingEnemyFrontSlots(team: ArenaClashTeamState): ActiveBoardSlotId[] {
+  return ACTIVE_BOARD_SLOTS.filter((slot) => slot.row === "front")
+    .map((slot) => slot.id)
+    .filter((slotId) => {
+      const unit = team.active[slotId];
+      return Boolean(unit && !unit.eliminated);
+    });
+}
+
+function getLivingEnemyCoreSlots(team: ArenaClashTeamState): ActiveBoardSlotId[] {
+  return ACTIVE_BOARD_SLOTS.filter((slot) => slot.row === "core")
+    .map((slot) => slot.id)
+    .filter((slotId) => {
+      const unit = team.active[slotId];
+      return Boolean(unit && !unit.eliminated);
+    });
+}
+
+function chooseNearestSlotByLane(
+  attackerSlotId: ActiveBoardSlotId,
+  candidateSlots: ActiveBoardSlotId[],
+): ActiveBoardSlotId | null {
+  if (candidateSlots.length === 0) return null;
+
+  const attackerLane = getSlotMeta(attackerSlotId).lane;
+
+  return [...candidateSlots].sort((a, b) => {
+    const aDist = Math.abs(getSlotMeta(a).lane - attackerLane);
+    const bDist = Math.abs(getSlotMeta(b).lane - attackerLane);
+    return aDist - bDist;
+  })[0];
+}
+
+function resolveAttackTargetSlot(params: {
+  attacker: ArenaClashRuntimeUnit;
+  defenderTeam: ArenaClashTeamState;
+  preferredTargetSlotId?: ActiveBoardSlotId;
+  targetRule?: ArenaClashSkillDefinition["targetRule"];
+}): ActiveBoardSlotId | null {
+  if (!params.attacker.slotId) return null;
+
+  const allFront = getLivingEnemyFrontSlots(params.defenderTeam);
+  const allCore = getLivingEnemyCoreSlots(params.defenderTeam);
+  const allLiving = getLivingEnemySlots(params.defenderTeam);
+
+  if (allLiving.length === 0) return null;
+
+  const targetRule = params.targetRule ?? "front-enemy";
+
+  if (params.preferredTargetSlotId) {
+    const targetUnit = params.defenderTeam.active[params.preferredTargetSlotId];
+    if (
+      targetUnit &&
+      !targetUnit.eliminated &&
+      (!hasLivingFrontline(params.defenderTeam) ||
+        isFrontSlot(params.preferredTargetSlotId) ||
+        targetRule === "any-enemy")
+    ) {
+      return params.preferredTargetSlotId;
+    }
+  }
+
+  if (targetRule === "any-enemy" && allLiving.length > 0) {
+    return chooseNearestSlotByLane(params.attacker.slotId, allLiving);
+  }
+
+  if (targetRule === "same-lane-enemy") {
+    const attackerMeta = getSlotMeta(params.attacker.slotId);
+    const sameLaneFront = allFront.find(
+      (slotId) => getSlotMeta(slotId).lane === attackerMeta.lane,
+    );
+    if (sameLaneFront) return sameLaneFront;
+
+    if (allFront.length > 0) return chooseNearestSlotByLane(params.attacker.slotId, allFront);
+
+    const sameLaneCore = allCore.find(
+      (slotId) => getSlotMeta(slotId).lane === attackerMeta.lane,
+    );
+    if (sameLaneCore) return sameLaneCore;
+    return chooseNearestSlotByLane(params.attacker.slotId, allCore);
+  }
+
+  if (targetRule === "broken-enemy") {
+    const brokenTargets = allLiving.filter((slotId) => {
+      const unit = params.defenderTeam.active[slotId];
+      return Boolean(unit && unit.breakTokens >= 1 && !unit.eliminated);
+    });
+
+    if (brokenTargets.length > 0) {
+      return chooseNearestSlotByLane(params.attacker.slotId, brokenTargets);
+    }
+  }
+
+  if (allFront.length > 0) {
+    return chooseNearestSlotByLane(params.attacker.slotId, allFront);
+  }
+
+  if (allCore.length > 0) {
+    return chooseNearestSlotByLane(params.attacker.slotId, allCore);
+  }
+
+  return chooseNearestSlotByLane(params.attacker.slotId, allLiving);
+}
+
+function getNormalForceSpend(
+  unit: ArenaClashRuntimeUnit,
+  action: "Strike" | "Burst",
+): number {
+  if (action === "Burst") return Math.min(unit.force, 16);
+  return Math.min(unit.force, 8);
+}
+
+function getSkillPressureMultiplier(
+  skill: ArenaClashSkillDefinition | null,
+  unit: ArenaClashRuntimeUnit,
+): number {
+  if (!skill) return 0;
+
+  const scalingScore = Object.entries(skill.statScaling).reduce(
+    (acc, [key, value]) => {
+      const statKey = key as keyof typeof unit.stats;
+      return acc + unit.stats[statKey] * (value ?? 0);
+    },
+    0,
   );
 
-  if (!exists) {
-    list.push({
+  return clamp(round(scalingScore / 400, 3), 0, 0.35);
+}
+
+function getFlatGuardBonusFromStatuses(unit: ArenaClashRuntimeUnit): number {
+  let bonus = 0;
+  if (hasStatus(unit, "GuardBoost")) bonus += 10;
+  if (hasStatus(unit, "DemonBack")) bonus += 4;
+  return bonus;
+}
+
+function getFlatReadBonusPctFromStatuses(unit: ArenaClashRuntimeUnit): number {
+  let bonus = 0;
+  if (hasStatus(unit, "ReadBuff")) bonus += 0.08;
+  if (hasStatus(unit, "DemonBack")) bonus += 0.1;
+  return bonus;
+}
+
+function getPressureBonusPctFromStatuses(unit: ArenaClashRuntimeUnit): number {
+  let bonus = 0;
+  if (hasStatus(unit, "PressureBuff")) bonus += 0.12;
+  if (hasStatus(unit, "DemonBack")) bonus += 0.18;
+  return bonus;
+}
+
+function getBreakThresholdMultiplierFromStatuses(
+  unit: ArenaClashRuntimeUnit,
+): number {
+  let mult = 1;
+  if (hasStatus(unit, "BreakResist")) mult += 0.12;
+  if (hasStatus(unit, "DemonBack")) mult += 0.1;
+  return mult;
+}
+
+function addBattleLog(state: ArenaClashMatchState, text: string) {
+  state.battleLog.push(text);
+  if (state.battleLog.length > 40) {
+    state.battleLog = state.battleLog.slice(-40);
+  }
+}
+
+function pushPopup(state: ArenaClashMatchState, popup: ReturnType<typeof createArenaPopupEvent>) {
+  state.popupQueue.push(popup);
+  if (state.popupQueue.length > 30) {
+    state.popupQueue = state.popupQueue.slice(-30);
+  }
+}
+
+function removeEliminatedActiveUnits(
+  state: ArenaClashMatchState,
+  side: ArenaClashSide,
+) {
+  const team = getTeam(state, side);
+
+  for (const slotId of Object.keys(team.active) as ActiveBoardSlotId[]) {
+    const unit = team.active[slotId];
+    if (!unit || !unit.eliminated) continue;
+
+    delete team.active[slotId];
+
+    pushPopup(
+      state,
+      createPopupFromDefinition(ARENA_POPUPS.state.break, {
+        side,
+        slotId,
+        targetUnitUid: unit.uid,
+      }),
+    );
+
+    addBattleLog(state, `${unit.cardName} is eliminated from ${side} ${slotId}.`);
+  }
+
+  removeEliminatedFromReserve(team);
+}
+
+function checkMatchEnd(state: ArenaClashMatchState): ArenaClashMatchState {
+  const playerAlive = countLivingUnits(state.player);
+  const enemyAlive = countLivingUnits(state.enemy);
+
+  if (playerAlive <= 0 && enemyAlive <= 0) {
+    state.phase = "finished";
+    state.winner = null;
+    state.loser = null;
+    state.finishedReason = "all_eliminated";
+    return state;
+  }
+
+  if (playerAlive <= 0) {
+    state.phase = "finished";
+    state.winner = "enemy";
+    state.loser = "player";
+    state.finishedReason = "all_eliminated";
+    return state;
+  }
+
+  if (enemyAlive <= 0) {
+    state.phase = "finished";
+    state.winner = "player";
+    state.loser = "enemy";
+    state.finishedReason = "all_eliminated";
+    return state;
+  }
+
+  if (!hasLivingCore(state.player) && state.player.reserve.length === 0) {
+    state.phase = "finished";
+    state.winner = "enemy";
+    state.loser = "player";
+    state.finishedReason = "collapse";
+    return state;
+  }
+
+  if (!hasLivingCore(state.enemy) && state.enemy.reserve.length === 0) {
+    state.phase = "finished";
+    state.winner = "player";
+    state.loser = "enemy";
+    state.finishedReason = "collapse";
+    return state;
+  }
+
+  return state;
+}
+
+function buildEnemyAutoCommands(
+  state: ArenaClashMatchState,
+): ArenaClashQueuedCommand[] {
+  const enemy = state.enemy;
+  const commands: ArenaClashQueuedCommand[] = [];
+
+  for (const unit of getLivingActiveUnits(enemy)) {
+    let action: ArenaClashActionType = "Strike";
+
+    if (unit.staggerRoundsLeft > 0) {
+      action = "Guard";
+    } else if (unit.breakMeter >= 70 && getCurrentRow(unit) === "front") {
+      action = "Guard";
+    } else if (unit.tempo >= 60 && canBurstThisRound(unit)) {
+      action = "Burst";
+    } else if (unit.force <= 8 || unit.tempo <= 12) {
+      action = "Charge";
+    }
+
+    commands.push({
+      unitUid: unit.uid,
+      action,
+    });
+  }
+
+  return commands;
+}
+
+function getSignatureForCommand(
+  unit: ArenaClashRuntimeUnit,
+  command: ArenaClashQueuedCommand,
+): ArenaClashSkillDefinition | null {
+  if (!command.useSignature && command.action !== "Skill") return null;
+  return getArenaClashSkill(unit.signatureSkillKey);
+}
+
+function maybeConsumeIgnoreFirstBreak(unit: ArenaClashRuntimeUnit): boolean {
+  const demonBack = unit.statusEffects.find(
+    (status) =>
+      status.type === "DemonBack" &&
+      typeof status.notes === "string" &&
+      status.notes.includes("ignoreFirstBreak") &&
+      !status.notes.includes("ignoreUsed"),
+  );
+
+  if (!demonBack) return false;
+
+  demonBack.notes = `${demonBack.notes}|ignoreUsed`;
+  return true;
+}
+
+function applyAttackResolution(params: {
+  state: ArenaClashMatchState;
+  attacker: ArenaClashRuntimeUnit;
+  defender: ArenaClashRuntimeUnit;
+  attackerSide: ArenaClashSide;
+  action: "Strike" | "Burst";
+  skill: ArenaClashSkillDefinition | null;
+}): void {
+  const { state, attacker, defender, attackerSide, action, skill } = params;
+  const defenderSide: ArenaClashSide = attackerSide === "player" ? "enemy" : "player";
+
+  const spentForce = skill?.forceCost
+    ? Math.min(attacker.force, skill.forceCost)
+    : getNormalForceSpend(attacker, action);
+
+  attacker.force = Math.max(0, attacker.force - spentForce);
+
+  const pressure = getEffectivePressure({
+    attackerStats: attacker.stats,
+    defenderStats: defender.stats,
+    action,
+    spentForce,
+    targetIsGuarding:
+      attackerSide === "player"
+        ? hasStatus(defender, "GuardBoost") || defender.lastAction === "Guard"
+        : hasStatus(defender, "GuardBoost") || defender.lastAction === "Guard",
+    targetIsFrontline: defender.slotId ? isFrontSlot(defender.slotId) : false,
+    flatGuardBonus: getFlatGuardBonusFromStatuses(defender),
+    flatReadBonusPct:
+      getFlatReadBonusPctFromStatuses(attacker) +
+      getSkillPressureMultiplier(skill, attacker) +
+      getPressureBonusPctFromStatuses(attacker),
+  });
+
+  const breakThreshold =
+    getBreakThreshold(defender.stats) * getBreakThresholdMultiplierFromStatuses(defender);
+
+  const result = applyPressureToBreakMeter({
+    currentBreakMeter: defender.breakMeter,
+    currentBreakTokens: defender.breakTokens,
+    breakThreshold,
+    pressure,
+  });
+
+  defender.breakMeter = result.nextBreakMeter;
+  defender.breakTokens = result.nextBreakTokens;
+
+  if (result.broke) {
+    const ignored = maybeConsumeIgnoreFirstBreak(defender);
+
+    if (ignored) {
+      defender.breakTokens = Math.max(0, defender.breakTokens - 1);
+      defender.breakMeter = 55;
+      pushPopup(
+        state,
+        createPopupFromDefinition(ARENA_POPUPS.result.block, {
+          side: defenderSide,
+          slotId: defender.slotId,
+          sourceUnitUid: attacker.uid,
+          targetUnitUid: defender.uid,
+        }),
+      );
+      addBattleLog(
+        state,
+        `${defender.cardName} ignores the first Break through a special body-state.`,
+      );
+    } else {
+      defender.staggerRoundsLeft = ARENA_CLASH_CONFIG.firstBreakStaggerRounds;
+      pushPopup(
+        state,
+        createPopupFromDefinition(ARENA_POPUPS.state.break, {
+          side: defenderSide,
+          slotId: defender.slotId,
+          sourceUnitUid: attacker.uid,
+          targetUnitUid: defender.uid,
+        }),
+      );
+      addBattleLog(
+        state,
+        `${attacker.cardName} ${action.toLowerCase()} pressures ${defender.cardName} for ${result.gainPercent}% and causes Break.`,
+      );
+    }
+  } else {
+    addBattleLog(
+      state,
+      `${attacker.cardName} ${action.toLowerCase()} pressures ${defender.cardName} for ${result.gainPercent}%.`,
+    );
+    pushPopup(
+      state,
+      createArenaPopupEvent({
+        text: `PRESSURE +${Math.round(result.gainPercent)}`,
+        kind: "result",
+        color: ARENA_POPUPS.result.pressure.color,
+        outline: ARENA_POPUPS.result.pressure.outline,
+        side: defenderSide,
+        slotId: defender.slotId,
+        sourceUnitUid: attacker.uid,
+        targetUnitUid: defender.uid,
+      }),
+    );
+  }
+
+  if (result.eliminated) {
+    defender.eliminated = true;
+    addBattleLog(state, `${defender.cardName} can no longer continue the fight.`);
+  }
+
+  if (action === "Strike") {
+    applyUnitTempoDelta(attacker, -8);
+    applyUnitForceDelta(attacker, 3);
+  } else {
+    applyUnitTempoDelta(attacker, -20);
+    applyUnitForceDelta(attacker, 5);
+  }
+}
+
+function applySupportToTeam(params: {
+  state: ArenaClashMatchState;
+  side: ArenaClashSide;
+  supportId: string;
+}): boolean {
+  const { state, side, supportId } = params;
+  const team = getTeam(state, side);
+  const support = getArenaClashSupport(supportId);
+
+  if (!support) return false;
+  if (!team.supportLoadout.some((item) => item.id === support.id)) return false;
+  if (!canUseSupport({ team, support, currentRound: state.roundNumber })) return false;
+  if (!spendTeamStoredForce(team, support.storedForceCost)) return false;
+
+  team.supportsUsedThisRound += 1;
+
+  for (const unit of getLivingActiveUnits(team)) {
+    if (support.baseModifiers?.guardValuePct || support.id === "indestructible_stance") {
+      addStatus(unit, {
+        id: `guard_boost_${support.id}_${unit.uid}`,
+        type: "GuardBoost",
+        remainingRounds: support.durationRounds ?? 1,
+        sourceId: support.id,
+      });
+    }
+
+    if (support.baseModifiers?.readValueFlat || support.id === "fist_eye_analysis") {
+      addStatus(unit, {
+        id: `read_buff_${support.id}_${unit.uid}`,
+        type: "ReadBuff",
+        remainingRounds: support.durationRounds ?? 1,
+        sourceId: support.id,
+      });
+    }
+
+    if (support.baseModifiers?.strikePressurePct || support.baseModifiers?.burstPressurePct) {
+      addStatus(unit, {
+        id: `pressure_buff_${support.id}_${unit.uid}`,
+        type: support.id === "demon_back" ? "DemonBack" : "PressureBuff",
+        remainingRounds: support.durationRounds ?? 1,
+        sourceId: support.id,
+        notes:
+          support.id === "demon_back" && unit.cardSlug === "yujiro-hanma"
+            ? "ignoreFirstBreak"
+            : undefined,
+      });
+    }
+
+    if (support.baseModifiers?.breakThresholdPct || support.id === "indestructible_stance") {
+      addStatus(unit, {
+        id: `break_resist_${support.id}_${unit.uid}`,
+        type: "BreakResist",
+        remainingRounds: support.durationRounds ?? 1,
+        sourceId: support.id,
+      });
+    }
+
+    if (support.baseModifiers?.chargeGainPct || support.id === "adrenal_override") {
+      addStatus(unit, {
+        id: `force_buff_${support.id}_${unit.uid}`,
+        type: "ForceBuff",
+        remainingRounds: support.durationRounds ?? 1,
+        sourceId: support.id,
+      });
+      applyUnitForceDelta(unit, 8);
+      applyUnitTempoDelta(unit, 8);
+    }
+
+    if (support.id === "demon_back" && unit.cardSlug === "yujiro-hanma") {
+      applyUnitForceDelta(unit, 12);
+      applyUnitTempoDelta(unit, 14);
+    }
+  }
+
+  const popup =
+    support.id === "demon_back"
+      ? ARENA_POPUPS.special.demonBack
+      : ARENA_POPUPS.special.godLike;
+
+  pushPopup(
+    state,
+    createPopupFromDefinition(popup, {
       side,
-      slot,
-      status,
-      applied: true,
+      slotId: null,
+    }),
+  );
+
+  addBattleLog(state, `${side} activates support: ${support.name}.`);
+  return true;
+}
+
+function resolveGuardOrChargeAction(params: {
+  state: ArenaClashMatchState;
+  resolved: ResolvedCommand;
+}) {
+  const { state, resolved } = params;
+  const unit = resolved.unit;
+  const action = resolved.command.action;
+  const row = getCurrentRow(unit);
+  const skill = getSignatureForCommand(unit, resolved.command);
+
+  if (unit.eliminated || unit.staggerRoundsLeft > 0) return;
+  if (row === "reserve") return;
+
+  if (skill) {
+    if (
+      !canUseSignatureSkill({
+        unit,
+        currentRow: row,
+        phase: state.phase,
+        teamSignaturesUsedThisRound: getTeam(state, resolved.side).signaturesUsedThisRound,
+      })
+    ) {
+      return;
+    }
+  }
+
+  if (action === "Guard" || (skill && skill.type === "Guard")) {
+    setUnitLastAction(unit, "Guard");
+    setUnitLastPopup(unit, ARENA_POPUPS.action.guard);
+
+    addStatus(unit, {
+      id: `guard_${unit.uid}_${state.roundNumber}`,
+      type: "GuardBoost",
+      remainingRounds: 1,
+      sourceId: skill?.key,
+    });
+
+    addStatus(unit, {
+      id: `read_${unit.uid}_${state.roundNumber}`,
+      type: "ReadBuff",
+      remainingRounds: skill ? 1 : 0,
+      sourceId: skill?.key,
+    });
+
+    applyUnitTempoDelta(unit, skill ? 10 : 6);
+
+    if (skill) {
+      markSkillUsage(unit, skill);
+      getTeam(state, resolved.side).signaturesUsedThisRound += 1;
+      pushPopup(
+        state,
+        createArenaPopupEvent({
+          text: skill.popupText,
+          kind: "special",
+          color: ARENA_POPUPS.action.skill.color,
+          outline: ARENA_POPUPS.action.skill.outline,
+          side: resolved.side,
+          slotId: unit.slotId,
+          sourceUnitUid: unit.uid,
+        }),
+      );
+    } else {
+      pushPopup(
+        state,
+        createPopupFromDefinition(ARENA_POPUPS.action.guard, {
+          side: resolved.side,
+          slotId: unit.slotId,
+          sourceUnitUid: unit.uid,
+        }),
+      );
+    }
+
+    addBattleLog(state, `${unit.cardName} takes Guard.`);
+    return;
+  }
+
+  if (action === "Charge" || (skill && skill.type === "Charge")) {
+    setUnitLastAction(unit, "Charge");
+    setUnitLastPopup(unit, ARENA_POPUPS.action.charge);
+
+    let forceGain = getChargeForceGain(unit.stats);
+    let tempoGain = getChargeTempoGain(unit.stats);
+
+    if (hasStatus(unit, "ForceBuff")) forceGain = round(forceGain * 1.12);
+    if (skill) {
+      forceGain = round(forceGain * (1 + getSkillPressureMultiplier(skill, unit)));
+      tempoGain = round(tempoGain * 1.18);
+      markSkillUsage(unit, skill);
+      getTeam(state, resolved.side).signaturesUsedThisRound += 1;
+      pushPopup(
+        state,
+        createArenaPopupEvent({
+          text: skill.popupText,
+          kind: "special",
+          color: ARENA_POPUPS.action.skill.color,
+          outline: ARENA_POPUPS.action.skill.outline,
+          side: resolved.side,
+          slotId: unit.slotId,
+          sourceUnitUid: unit.uid,
+        }),
+      );
+    } else {
+      pushPopup(
+        state,
+        createPopupFromDefinition(ARENA_POPUPS.action.charge, {
+          side: resolved.side,
+          slotId: unit.slotId,
+          sourceUnitUid: unit.uid,
+        }),
+      );
+    }
+
+    applyUnitForceDelta(unit, forceGain);
+    applyUnitTempoDelta(unit, tempoGain);
+
+    addBattleLog(
+      state,
+      `${unit.cardName} charges up (+${Math.round(forceGain)} Force, +${Math.round(
+        tempoGain,
+      )} Tempo).`,
+    );
+  }
+}
+
+function resolveAttackPhaseForAction(params: {
+  state: ArenaClashMatchState;
+  action: "Strike" | "Burst";
+}) {
+  const { state, action } = params;
+
+  const allResolved = sortResolvedCommandsByInitiative([
+    ...getResolvedCommandsForSide(state, "player"),
+    ...getResolvedCommandsForSide(state, "enemy"),
+  ]);
+
+  for (const resolved of allResolved) {
+    const unit = resolved.unit;
+    const currentTeam = getTeam(state, resolved.side);
+    const unitOnBoard = unit.slotId ? currentTeam.active[unit.slotId] : null;
+    if (!unitOnBoard || unitOnBoard.uid !== unit.uid) continue;
+    if (unitOnBoard.eliminated || unitOnBoard.staggerRoundsLeft > 0) continue;
+
+    const skill = getSignatureForCommand(unitOnBoard, resolved.command);
+    const effectiveAction: ArenaClashActionType =
+      skill?.type && ["Strike", "Burst"].includes(skill.type)
+        ? (skill.type as ArenaClashActionType)
+        : resolved.command.action;
+
+    if (effectiveAction !== action) continue;
+    if (action === "Burst" && !canBurstThisRound(unitOnBoard)) continue;
+
+    const targetTeam = getOpponentTeam(state, resolved.side);
+    const targetSlot = resolveAttackTargetSlot({
+      attacker: unitOnBoard,
+      defenderTeam: targetTeam,
+      preferredTargetSlotId: resolved.command.targetSlotId,
+      targetRule: skill?.targetRule,
+    });
+
+    if (!targetSlot) continue;
+
+    const defender = getUnitAtSlot(targetTeam, targetSlot);
+    if (!defender || defender.eliminated) continue;
+
+    setUnitLastAction(unitOnBoard, action);
+    setUnitLastPopup(
+      unitOnBoard,
+      action === "Strike" ? ARENA_POPUPS.action.strike : ARENA_POPUPS.action.burst,
+    );
+
+    if (skill) {
+      if (
+        !canUseSignatureSkill({
+          unit: unitOnBoard,
+          currentRow: getCurrentRow(unitOnBoard),
+          phase: state.phase,
+          teamSignaturesUsedThisRound: currentTeam.signaturesUsedThisRound,
+        })
+      ) {
+        continue;
+      }
+
+      markSkillUsage(unitOnBoard, skill);
+      currentTeam.signaturesUsedThisRound += 1;
+      pushPopup(
+        state,
+        createArenaPopupEvent({
+          text: skill.popupText,
+          kind: "special",
+          color: ARENA_POPUPS.action.skill.color,
+          outline: ARENA_POPUPS.action.skill.outline,
+          side: resolved.side,
+          slotId: unitOnBoard.slotId,
+          sourceUnitUid: unitOnBoard.uid,
+          targetUnitUid: defender.uid,
+        }),
+      );
+    } else {
+      pushPopup(
+        state,
+        createPopupFromDefinition(
+          action === "Strike" ? ARENA_POPUPS.action.strike : ARENA_POPUPS.action.burst,
+          {
+            side: resolved.side,
+            slotId: unitOnBoard.slotId,
+            sourceUnitUid: unitOnBoard.uid,
+            targetUnitUid: defender.uid,
+          },
+        ),
+      );
+    }
+
+    applyAttackResolution({
+      state,
+      attacker: unitOnBoard,
+      defender,
+      attackerSide: resolved.side,
+      action,
+      skill,
     });
   }
 }
 
-function shiftTier(
-  tier: ArenaClashResultTier,
-  amount: -1 | 0 | 1,
-): ArenaClashResultTier {
-  const order: ArenaClashResultTier[] = ["none", "light", "clean", "crush"];
-  const index = order.indexOf(tier);
-  const next = Math.max(0, Math.min(order.length - 1, index + amount));
-  return order[next];
+export function isInitialDeploymentValid(team: ArenaClashTeamState): boolean {
+  const activeCount = countActiveUnits(team);
+  const frontlineCount = countFrontlineUnits(team);
+
+  return (
+    activeCount >= ARENA_CLASH_CONFIG.initialDeployCount &&
+    frontlineCount >= ARENA_CLASH_CONFIG.minFrontlineOnInitialDeploy
+  );
 }
 
-function getSkillFromAction(
-  card: ArenaClashBattleCardRuntime,
-  action: ArenaClashActionSelection,
-): ArenaClashSkillDefinition | null {
-  if (action.type !== "Skill") {
-    return null;
-  }
+export function autoDeployTeam(team: ArenaClashTeamState, desiredCount = ARENA_CLASH_CONFIG.initialDeployCount) {
+  while (
+    countActiveUnits(team) < desiredCount &&
+    team.reserve.length > 0
+  ) {
+    const nextReserve = team.reserve[0];
+    const targetSlotId = findFirstEmptyPreferredSlot(team, nextReserve.preferredRows);
 
-  const explicitKey = action.skillKey?.trim();
-  if (explicitKey) {
-    return getArenaClashSkill(explicitKey);
-  }
+    if (!targetSlotId) break;
 
-  const resolvedKey = resolveArenaClashSkillKey(card.card);
-  return getArenaClashSkill(resolvedKey);
+    moveReserveUnitToSlot({
+      team,
+      reserveUid: nextReserve.uid,
+      slotId: targetSlotId,
+    });
+  }
 }
 
-function normalizeActionForSide(
-  team: ArenaClashTeamState,
-  enemyTeam: ArenaClashTeamState,
-  side: ArenaClashSide,
-  action: ArenaClashActionSelection,
-): NormalizedArenaClashAction {
-  const logs: string[] = [];
-  const active = getArenaClashActiveCard(team);
+export function startArenaClashBattle(
+  state: ArenaClashMatchState,
+): ArenaClashMatchState {
+  const next = cloneMatchState(state);
 
-  if (isArenaClashCardKO(active)) {
-    logs.push(`${side}: active fighter is KO and cannot act.`);
-    return {
-      side,
-      action: { type: "Guard" },
-      skill: null,
-      logs,
-    };
+  if (!isInitialDeploymentValid(next.player)) {
+    addBattleLog(next, "Player deployment is not valid yet.");
+    return next;
   }
 
-  if (action.type === "Skill") {
-    const skill = getSkillFromAction(active, action);
+  autoDeployTeam(next.enemy, ARENA_CLASH_CONFIG.initialDeployCount);
 
-    if (!skill) {
-      logs.push(`${side}: skill was invalid, falling back to Strike.`);
-      return {
-        side,
-        action: { type: "Strike" },
-        skill: null,
-        logs,
-      };
-    }
-
-    if (active.focus < skill.focusCost) {
-      logs.push(`${side}: not enough Focus for ${skill.name}, falling back to Strike.`);
-      return {
-        side,
-        action: { type: "Strike" },
-        skill: null,
-        logs,
-      };
-    }
-
-    const cooldown = active.skillState.cooldowns[skill.key] ?? 0;
-    if (cooldown > 0) {
-      logs.push(`${side}: ${skill.name} is on cooldown, falling back to Strike.`);
-      return {
-        side,
-        action: { type: "Strike" },
-        skill: null,
-        logs,
-      };
-    }
-
-    if (skill.oncePerBattle && active.skillState.usedThisBattle[skill.key]) {
-      logs.push(`${side}: ${skill.name} is once per battle and already used.`);
-      return {
-        side,
-        action: { type: "Strike" },
-        skill: null,
-        logs,
-      };
-    }
-
-    if (skill.oncePerFielding && active.skillState.usedThisFielding[skill.key]) {
-      logs.push(`${side}: ${skill.name} is once per fielding and already used.`);
-      return {
-        side,
-        action: { type: "Strike" },
-        skill: null,
-        logs,
-      };
-    }
-
-    return {
-      side,
-      action,
-      skill,
-      logs,
-    };
-  }
-
-  if (action.type === "Switch") {
-    const targetSlot = action.targetReserveSlot;
-
-    if (targetSlot == null) {
-      logs.push(`${side}: Switch has no target slot, falling back to Guard.`);
-      return {
-        side,
-        action: { type: "Guard" },
-        skill: null,
-        logs,
-      };
-    }
-
-    if (targetSlot === team.activeSlot) {
-      logs.push(`${side}: Switch target equals active slot, falling back to Guard.`);
-      return {
-        side,
-        action: { type: "Guard" },
-        skill: null,
-        logs,
-      };
-    }
-
-    const target = team.fighters[targetSlot];
-    if (!target || isArenaClashCardKO(target)) {
-      logs.push(`${side}: Switch target is invalid or KO, falling back to Guard.`);
-      return {
-        side,
-        action: { type: "Guard" },
-        skill: null,
-        logs,
-      };
-    }
-
-    const cost = getArenaClashTempoCostByRarity(target.rarity);
-    if (team.tempo < cost) {
-      logs.push(`${side}: not enough Tempo to switch in ${target.card.name}, falling back to Guard.`);
-      return {
-        side,
-        action: { type: "Guard" },
-        skill: null,
-        logs,
-      };
-    }
-
-    return {
-      side,
-      action,
-      skill: null,
-      logs,
-    };
-  }
-
-  void enemyTeam;
-
-  return {
-    side,
-    action,
-    skill: null,
-    logs,
-  };
-}
-
-function getBaseStats(card: ArenaClashBattleCardRuntime): ArenaClashStatBlock {
-  return { ...card.card.stats };
-}
-
-function applyDelta(
-  stats: ArenaClashStatBlock,
-  delta: Partial<ArenaClashStatBlock>,
-): ArenaClashStatBlock {
-  const next = { ...stats };
-
-  (Object.keys(delta) as (keyof ArenaClashStatBlock)[]).forEach((key) => {
-    next[key] = Math.max(0, next[key] + (delta[key] ?? 0));
-  });
+  next.phase = "command";
+  next.battleLog = [
+    ...next.battleLog,
+    "Enemy deployment complete.",
+    "Arena Crash begins. Choose commands.",
+  ];
 
   return next;
 }
 
-function getStatsForClash(ctx: ArenaClashStatContext): ArenaClashStatBlock {
-  let stats = getBaseStats(ctx.actor);
+export function resolveDeployPhase(
+  state: ArenaClashMatchState,
+): ArenaClashMatchState {
+  const next = cloneMatchState(state);
 
-  if (ctx.actor.state === "Pressured") {
-    stats = applyDelta(stats, ARENA_CLASH_PRESSURED_PENALTY);
+  if (isInitialDeploymentValid(next.player)) {
+    next.phase = "enemy-deploy";
+    addBattleLog(next, "Player deployment locked. Enemy deployment begins.");
   }
 
-  if (ctx.actor.state === "Broken") {
-    stats = applyDelta(stats, ARENA_CLASH_BROKEN_PENALTY);
-  }
-
-  if (hasStatus(ctx.actor, "Strain")) {
-    stats = applyDelta(stats, ARENA_CLASH_STRAIN_PENALTY);
-  }
-
-  if (hasStatus(ctx.actor, "TempoDown")) {
-    stats = applyDelta(stats, {
-      SPD: -8,
-      INSTINCT: -6,
-    });
-  }
-
-  if (hasStatus(ctx.actor, "Stun")) {
-    stats = applyDelta(stats, {
-      SPD: -20,
-    });
-  }
-
-  if (ctx.actorAction.type === "Guard" && ctx.actorGuardBonus) {
-    stats = applyDelta(stats, ARENA_CLASH_GUARD_BONUS);
-  }
-
-  if (ctx.actorAction.type === "Charge") {
-    stats = applyDelta(stats, ARENA_CLASH_CHARGE_PENALTY);
-  }
-
-  const skill = ctx.actorSkill;
-  if (skill && skill.modifiesClash?.includes(ctx.clashKind) && skill.flatBonuses) {
-    stats = applyDelta(stats, skill.flatBonuses);
-  }
-
-  return stats;
+  return next;
 }
 
-function getWeightShift(
-  skill: ArenaClashSkillDefinition | null,
-  key:
-    | "speedSPD"
-    | "speedINSTINCT"
-    | "entrySPD"
-    | "entryTECH"
-    | "entryINSTINCT"
-    | "entryDEF"
-    | "powerSTR"
-    | "powerTECH"
-    | "powerDEF"
-    | "powerDUR"
-    | "reversalTECH"
-    | "reversalINSTINCT"
-    | "reversalSTR"
-    | "reversalSPD",
-): number {
-  return skill?.weightShift?.[key] ?? 0;
+export function resolveEnemyDeployPhase(
+  state: ArenaClashMatchState,
+): ArenaClashMatchState {
+  const next = cloneMatchState(state);
+  autoDeployTeam(next.enemy, ARENA_CLASH_CONFIG.initialDeployCount);
+  next.phase = "command";
+  addBattleLog(next, "Enemy deployment complete.");
+  return next;
 }
 
-function buildClashSnapshot(
-  kind: ArenaClashKind,
-  attackerSide: ArenaClashSide,
-  defenderSide: ArenaClashSide,
-  attackerValue: number,
-  defenderValue: number,
-): ArenaClashSnapshot {
-  const difference = round2(Math.abs(attackerValue - defenderValue));
+export function resolveSwitchPhase(
+  state: ArenaClashMatchState,
+): ArenaClashMatchState {
+  const next = cloneMatchState(state);
+  next.phase = "switch";
 
-  let winnerSide: ArenaClashSide | "draw" = "draw";
-  if (attackerValue > defenderValue + EPSILON) {
-    winnerSide = attackerSide;
-  } else if (defenderValue > attackerValue + EPSILON) {
-    winnerSide = defenderSide;
+  for (const side of ["player", "enemy"] as ArenaClashSide[]) {
+    const team = getTeam(next, side);
+    const sourceCommands =
+      side === "player" ? next.queuedPlayerCommands : next.queuedEnemyCommands;
+
+    const switchCommands = sortResolvedCommandsByInitiative(
+  getLivingActiveUnits(team)
+    .map((unit): ResolvedCommand | null => {
+      const command = sourceCommands.find(
+        (item) => item.unitUid === unit.uid && item.action === "Switch",
+      );
+
+      if (!command) return null;
+
+      return {
+        unit,
+        command,
+        skill: null,
+        side,
+      };
+    })
+    .filter((item): item is ResolvedCommand => item !== null),
+);
+
+    for (const resolved of switchCommands) {
+      const actingUnit = resolved.unit.slotId ? team.active[resolved.unit.slotId] : null;
+      if (!actingUnit || actingUnit.uid !== resolved.unit.uid) continue;
+      if (!canUseSwitch({ team, unit: actingUnit })) continue;
+      if (!resolved.command.chosenReserveUid || !actingUnit.slotId) continue;
+      if (!spendTeamStoredForce(team, ARENA_CLASH_CONFIG.switchStoredForceCost)) continue;
+
+      const originalSlotId = actingUnit.slotId;
+      const movedOut = moveActiveUnitToReserve({
+        team,
+        slotId: originalSlotId,
+      });
+
+      if (!movedOut) continue;
+
+      const movedIn = moveReserveUnitToSlot({
+        team,
+        reserveUid: resolved.command.chosenReserveUid,
+        slotId: originalSlotId,
+      });
+
+      if (!movedIn) {
+        moveReserveUnitToSlot({
+          team,
+          reserveUid: movedOut.uid,
+          slotId: originalSlotId,
+        });
+        continue;
+      }
+
+      const entryBonuses = getSwitchEntryBonuses(movedIn.stats);
+      applyUnitTempoDelta(movedIn, entryBonuses.tempoBonus);
+      applyUnitForceDelta(movedIn, 4);
+
+      addStatus(movedIn, {
+        id: `cannot_burst_${movedIn.uid}_${next.roundNumber}`,
+        type: "CannotBurst",
+        remainingRounds: 1,
+        sourceId: "Switch",
+      });
+
+      addStatus(movedIn, {
+        id: `entry_guard_${movedIn.uid}_${next.roundNumber}`,
+        type: "GuardBoost",
+        remainingRounds: 1,
+        sourceId: "Switch",
+      });
+
+      addStatus(movedIn, {
+        id: `entry_read_${movedIn.uid}_${next.roundNumber}`,
+        type: "ReadBuff",
+        remainingRounds: 1,
+        sourceId: "Switch",
+      });
+
+      team.switchesUsedThisRound += 1;
+
+      pushPopup(
+        next,
+        createPopupFromDefinition(ARENA_POPUPS.action.switch, {
+          side,
+          slotId: originalSlotId,
+          sourceUnitUid: actingUnit.uid,
+          targetUnitUid: movedIn.uid,
+        }),
+      );
+
+      pushPopup(
+        next,
+        createPopupFromDefinition(ARENA_POPUPS.result.entry, {
+          side,
+          slotId: originalSlotId,
+          targetUnitUid: movedIn.uid,
+        }),
+      );
+
+      addBattleLog(
+        next,
+        `${side} switches ${actingUnit.cardName} out for ${movedIn.cardName}.`,
+      );
+
+      break;
+    }
   }
 
-  return {
-    kind,
-    attackerSide,
-    defenderSide,
-    attackerValue: round2(attackerValue),
-    defenderValue: round2(defenderValue),
-    difference,
-    winnerSide,
-  };
+  return next;
 }
 
-function speedClash(
-  attacker: ArenaClashBattleCardRuntime,
-  defender: ArenaClashBattleCardRuntime,
-  attackerAction: ArenaClashActionSelection,
-  defenderAction: ArenaClashActionSelection,
-  attackerSkill: ArenaClashSkillDefinition | null,
-  defenderSkill: ArenaClashSkillDefinition | null,
-): ArenaClashSnapshot {
-  const atk = getStatsForClash({
-    actor: attacker,
-    actorAction: attackerAction,
-    actorSkill: attackerSkill,
-    clashKind: "SpeedClash",
-    isAttacker: true,
-    actorSide: attacker.owner,
-    enemyAction: defenderAction,
-  });
+export function resolveSupportPhase(
+  state: ArenaClashMatchState,
+): ArenaClashMatchState {
+  const next = cloneMatchState(state);
+  next.phase = "support";
 
-  const def = getStatsForClash({
-    actor: defender,
-    actorAction: defenderAction,
-    actorSkill: defenderSkill,
-    clashKind: "SpeedClash",
-    isAttacker: false,
-    actorSide: defender.owner,
-    enemyAction: attackerAction,
-  });
+  for (const side of ["player", "enemy"] as ArenaClashSide[]) {
+    const commands =
+      side === "player" ? next.queuedPlayerCommands : next.queuedEnemyCommands;
 
-  const atkValue =
-    atk.SPD * (0.6 + getWeightShift(attackerSkill, "speedSPD")) +
-    atk.INSTINCT * (0.4 + getWeightShift(attackerSkill, "speedINSTINCT"));
+    const supportCommand = commands.find((command) => Boolean(command.chosenSupportId));
+    if (!supportCommand?.chosenSupportId) continue;
 
-  let defInstinct = def.INSTINCT;
-  if (attackerSkill?.ignoreInstinctPercent) {
-    defInstinct *= 1 - attackerSkill.ignoreInstinctPercent / 100;
-  }
-
-  const defValue =
-    def.SPD * (0.6 + getWeightShift(defenderSkill, "speedSPD")) +
-    defInstinct * (0.4 + getWeightShift(defenderSkill, "speedINSTINCT"));
-
-  return buildClashSnapshot(
-    "SpeedClash",
-    attacker.owner,
-    defender.owner,
-    atkValue,
-    defValue,
-  );
-}
-
-function entryClash(
-  attacker: ArenaClashBattleCardRuntime,
-  defender: ArenaClashBattleCardRuntime,
-  attackerAction: ArenaClashActionSelection,
-  defenderAction: ArenaClashActionSelection,
-  attackerSkill: ArenaClashSkillDefinition | null,
-  defenderSkill: ArenaClashSkillDefinition | null,
-): ArenaClashSnapshot {
-  const atk = getStatsForClash({
-    actor: attacker,
-    actorAction: attackerAction,
-    actorSkill: attackerSkill,
-    clashKind: "EntryClash",
-    isAttacker: true,
-    actorSide: attacker.owner,
-    enemyAction: defenderAction,
-  });
-
-  const def = getStatsForClash({
-    actor: defender,
-    actorAction: defenderAction,
-    actorSkill: defenderSkill,
-    clashKind: "EntryClash",
-    isAttacker: false,
-    actorSide: defender.owner,
-    enemyAction: attackerAction,
-    actorGuardBonus: defenderAction.type === "Guard" || defenderSkill?.type === "Stance",
-  });
-
-  const atkValue =
-    atk.SPD * (0.35 + getWeightShift(attackerSkill, "entrySPD")) +
-    atk.TECH * (0.25 + getWeightShift(attackerSkill, "entryTECH")) +
-    atk.INSTINCT * (0.4 + getWeightShift(attackerSkill, "entryINSTINCT"));
-
-  let defInstinct = def.INSTINCT;
-  if (attackerSkill?.ignoreInstinctPercent) {
-    defInstinct *= 1 - attackerSkill.ignoreInstinctPercent / 100;
-  }
-
-  const defValue =
-    def.SPD * 0.25 +
-    def.DEF * (0.25 + getWeightShift(defenderSkill, "entryDEF")) +
-    defInstinct * (0.5 + getWeightShift(defenderSkill, "entryINSTINCT"));
-
-  return buildClashSnapshot(
-    "EntryClash",
-    attacker.owner,
-    defender.owner,
-    atkValue,
-    defValue,
-  );
-}
-
-function powerClash(
-  attacker: ArenaClashBattleCardRuntime,
-  defender: ArenaClashBattleCardRuntime,
-  attackerAction: ArenaClashActionSelection,
-  defenderAction: ArenaClashActionSelection,
-  attackerSkill: ArenaClashSkillDefinition | null,
-  defenderSkill: ArenaClashSkillDefinition | null,
-): ArenaClashSnapshot {
-  const atk = getStatsForClash({
-    actor: attacker,
-    actorAction: attackerAction,
-    actorSkill: attackerSkill,
-    clashKind: "PowerClash",
-    isAttacker: true,
-    actorSide: attacker.owner,
-    enemyAction: defenderAction,
-  });
-
-  const def = getStatsForClash({
-    actor: defender,
-    actorAction: defenderAction,
-    actorSkill: defenderSkill,
-    clashKind: "PowerClash",
-    isAttacker: false,
-    actorSide: defender.owner,
-    enemyAction: attackerAction,
-    actorGuardBonus: defenderAction.type === "Guard" || defenderSkill?.type === "Stance",
-  });
-
-  let effectiveDef = def.DEF;
-  let effectiveDur = def.DUR;
-
-  if (hasStatus(defender, "GuardBreak")) {
-    effectiveDef *= 0.75;
-  }
-
-  if (attackerSkill?.ignoreDefensePercent) {
-    effectiveDef *= 1 - attackerSkill.ignoreDefensePercent / 100;
-  }
-
-  if (attackerSkill?.ignoreDurabilityPercent) {
-    effectiveDur *= 1 - attackerSkill.ignoreDurabilityPercent / 100;
-  }
-
-  const atkValue =
-    atk.STR * (0.6 + getWeightShift(attackerSkill, "powerSTR")) +
-    atk.TECH * (0.4 + getWeightShift(attackerSkill, "powerTECH"));
-
-  const defValue =
-    effectiveDef * (0.55 + getWeightShift(defenderSkill, "powerDEF")) +
-    effectiveDur * (0.45 + getWeightShift(defenderSkill, "powerDUR"));
-
-  return buildClashSnapshot(
-    "PowerClash",
-    attacker.owner,
-    defender.owner,
-    atkValue,
-    defValue,
-  );
-}
-
-function reversalClash(
-  counterer: ArenaClashBattleCardRuntime,
-  incoming: ArenaClashBattleCardRuntime,
-  counterAction: ArenaClashActionSelection,
-  incomingAction: ArenaClashActionSelection,
-  counterSkill: ArenaClashSkillDefinition | null,
-  incomingSkill: ArenaClashSkillDefinition | null,
-): ArenaClashSnapshot {
-  const ctr = getStatsForClash({
-    actor: counterer,
-    actorAction: counterAction,
-    actorSkill: counterSkill,
-    clashKind: "ReversalClash",
-    isAttacker: false,
-    actorSide: counterer.owner,
-    enemyAction: incomingAction,
-  });
-
-  const inc = getStatsForClash({
-    actor: incoming,
-    actorAction: incomingAction,
-    actorSkill: incomingSkill,
-    clashKind: "ReversalClash",
-    isAttacker: true,
-    actorSide: incoming.owner,
-    enemyAction: counterAction,
-  });
-
-  const ctrValue =
-    ctr.TECH * (0.45 + getWeightShift(counterSkill, "reversalTECH")) +
-    ctr.INSTINCT * (0.55 + getWeightShift(counterSkill, "reversalINSTINCT"));
-
-  const incValue =
-    inc.STR * (0.5 + getWeightShift(incomingSkill, "reversalSTR")) +
-    inc.SPD * (0.25 + getWeightShift(incomingSkill, "reversalSPD")) +
-    inc.TECH * 0.25;
-
-  return buildClashSnapshot(
-    "ReversalClash",
-    incoming.owner,
-    counterer.owner,
-    incValue,
-    ctrValue,
-  );
-}
-
-function getTierFromDifference(diff: number): ArenaClashResultTier {
-  if (diff <= 0) return "none";
-  if (diff <= 7) return "light";
-  if (diff <= 17) return "clean";
-  return "crush";
-}
-
-function applyTierModifiers(
-  baseTier: ArenaClashResultTier,
-  winnerSkill: ArenaClashSkillDefinition | null,
-  loserCard: ArenaClashBattleCardRuntime,
-): ArenaClashResultTier {
-  let tier = baseTier;
-
-  if (winnerSkill?.resultShift?.onWin) {
-    tier = shiftTier(tier, winnerSkill.resultShift.onWin);
-  }
-
-  if (hasStatus(loserCard, "Bleed")) {
-    tier = shiftTier(tier, 1);
-  }
-
-  if (hasStatus(loserCard, "Shield")) {
-    tier = shiftTier(tier, -1);
-  }
-
-  return tier;
-}
-
-function pushStateTransition(
-  list: ArenaClashStateTransition[],
-  side: ArenaClashSide,
-  slot: number,
-  from: ArenaClashBattleCardRuntime["state"],
-  tier: ArenaClashResultTier,
-) {
-  const to = getArenaClashNextStateAfterTier(from, tier);
-
-  if (from !== to) {
-    list.push({
+    applySupportToTeam({
+      state: next,
       side,
-      slot,
-      from,
-      to,
+      supportId: supportCommand.chosenSupportId,
     });
   }
+
+  return next;
 }
 
-function isAggressiveSkill(skill: ArenaClashSkillDefinition | null): boolean {
-  return skill != null && ["Burst", "Pierce", "Control", "Utility"].includes(skill.type);
-}
+export function resolveGuardChargePhase(
+  state: ArenaClashMatchState,
+): ArenaClashMatchState {
+  const next = cloneMatchState(state);
+  next.phase = "guard-charge";
 
-function isCounterSkill(skill: ArenaClashSkillDefinition | null): boolean {
-  return skill?.type === "Counter";
-}
+  const allResolved = sortResolvedCommandsByInitiative([
+    ...getResolvedCommandsForSide(next, "player"),
+    ...getResolvedCommandsForSide(next, "enemy"),
+  ]);
 
-function isStanceSkill(skill: ArenaClashSkillDefinition | null): boolean {
-  return skill?.type === "Stance";
-}
-
-function getFocusRewardForWinner(tier: ArenaClashResultTier): number {
-  return tier === "none" ? 0 : 1;
-}
-
-function buildBaseResolution(
-  exchangeNumber: number,
-  playerAction: ArenaClashActionSelection,
-  enemyAction: ArenaClashActionSelection,
-): ArenaClashExchangeResolution {
-  return {
-    exchangeNumber,
-    playerAction,
-    enemyAction,
-    primaryClash: "None",
-    secondaryClash: undefined,
-    resultTier: "none",
-    winnerSide: "none",
-    clashes: [],
-    stateTransitions: [],
-    statusApplications: [],
-    focusChanges: {
-      player: 0,
-      enemy: 0,
-    },
-    tempoChanges: {
-      player: 0,
-      enemy: 0,
-    },
-    koOccurred: false,
-    roundEnded: false,
-    logs: [],
-  };
-}
-
-function setRoundFlags(resolution: ArenaClashExchangeResolution) {
-  resolution.koOccurred = resolution.stateTransitions.some((t) => t.to === "KO");
-  resolution.roundEnded = resolution.koOccurred;
-}
-
-function applySelfSkillCostsAndStatuses(
-  resolution: ArenaClashExchangeResolution,
-  side: ArenaClashSide,
-  card: ArenaClashBattleCardRuntime,
-  skill: ArenaClashSkillDefinition | null,
-) {
-  if (!skill) return;
-
-  if (side === "player") {
-    resolution.focusChanges.player -= skill.focusCost;
-  } else {
-    resolution.focusChanges.enemy -= skill.focusCost;
+  for (const resolved of allResolved) {
+    resolveGuardOrChargeAction({
+      state: next,
+      resolved,
+    });
   }
 
-  skill.applyStatusesToSelf?.forEach((status) => {
-    pushUniqueStatus(resolution.statusApplications, side, card.slot, status);
+  return next;
+}
+
+export function resolveStrikePhase(
+  state: ArenaClashMatchState,
+): ArenaClashMatchState {
+  const next = cloneMatchState(state);
+  next.phase = "strike";
+  resolveAttackPhaseForAction({
+    state: next,
+    action: "Strike",
   });
-
-  resolution.logs.push(`${side} uses ${skill.name}.`);
+  return next;
 }
 
-function applyEnemySkillStatusesOnWin(
-  resolution: ArenaClashExchangeResolution,
-  winnerSide: ArenaClashSide,
-  targetSide: ArenaClashSide,
-  targetSlot: number,
-  skill: ArenaClashSkillDefinition | null,
-) {
-  if (!skill) return;
-
-  skill.applyStatusesToEnemy?.forEach((status) => {
-    pushUniqueStatus(resolution.statusApplications, targetSide, targetSlot, status);
+export function resolveBurstPhase(
+  state: ArenaClashMatchState,
+): ArenaClashMatchState {
+  const next = cloneMatchState(state);
+  next.phase = "burst";
+  resolveAttackPhaseForAction({
+    state: next,
+    action: "Burst",
   });
-
-  resolution.logs.push(`${winnerSide} successfully applies ${skill.name} effects.`);
+  return next;
 }
 
-function addWinnerFocus(
-  resolution: ArenaClashExchangeResolution,
-  side: ArenaClashSide | "draw" | "none",
-  tier: ArenaClashResultTier,
-) {
-  const gain = getFocusRewardForWinner(tier);
-  if (!gain) return;
+export function resolveBreakPhase(
+  state: ArenaClashMatchState,
+): ArenaClashMatchState {
+  const next = cloneMatchState(state);
+  next.phase = "break";
 
-  if (side === "player") resolution.focusChanges.player += gain;
-  if (side === "enemy") resolution.focusChanges.enemy += gain;
+  removeEliminatedActiveUnits(next, "player");
+  removeEliminatedActiveUnits(next, "enemy");
+
+  const playerFrontBefore = hasLivingFrontline(next.player);
+  const enemyFrontBefore = hasLivingFrontline(next.enemy);
+
+  if (!playerFrontBefore) {
+    pushPopup(
+      next,
+      createPopupFromDefinition(ARENA_POPUPS.state.frontDown, {
+        side: "player",
+        slotId: null,
+      }),
+    );
+    addBattleLog(next, "Player frontline is down.");
+  }
+
+  if (!enemyFrontBefore) {
+    pushPopup(
+      next,
+      createPopupFromDefinition(ARENA_POPUPS.state.frontDown, {
+        side: "enemy",
+        slotId: null,
+      }),
+    );
+    addBattleLog(next, "Enemy frontline is down.");
+  }
+
+  if (!hasLivingCore(next.player)) {
+    pushPopup(
+      next,
+      createPopupFromDefinition(ARENA_POPUPS.state.coreOpen, {
+        side: "player",
+        slotId: null,
+      }),
+    );
+    addBattleLog(next, "Player core is open.");
+  }
+
+  if (!hasLivingCore(next.enemy)) {
+    pushPopup(
+      next,
+      createPopupFromDefinition(ARENA_POPUPS.state.coreOpen, {
+        side: "enemy",
+        slotId: null,
+      }),
+    );
+    addBattleLog(next, "Enemy core is open.");
+  }
+
+  return checkMatchEnd(next);
 }
 
-function resolveStrikeLikeSequence(params: {
-  resolution: ArenaClashExchangeResolution;
-  attacker: ArenaClashBattleCardRuntime;
-  defender: ArenaClashBattleCardRuntime;
-  attackerAction: ArenaClashActionSelection;
-  defenderAction: ArenaClashActionSelection;
-  attackerSkill: ArenaClashSkillDefinition | null;
-  defenderSkill: ArenaClashSkillDefinition | null;
-  applyToSlot: number;
-  guardDefender?: boolean;
-  reducedByOneStep?: boolean;
-}) {
-  const {
-    resolution,
-    attacker,
-    defender,
-    attackerAction,
-    defenderAction,
-    attackerSkill,
-    defenderSkill,
-    applyToSlot,
-    reducedByOneStep,
-  } = params;
-
-  const entry = entryClash(
-    attacker,
-    defender,
-    attackerAction,
-    defenderAction,
-    attackerSkill,
-    defenderSkill,
+function generateStoredForce(team: ArenaClashTeamState) {
+  const totalForce = getLivingActiveUnits(team).reduce(
+    (sum, unit) => sum + unit.force,
+    0,
   );
 
-  resolution.primaryClash = "EntryClash";
-  resolution.clashes.push(entry);
-
-  if (entry.winnerSide !== attacker.owner) {
-    resolution.winnerSide = defender.owner;
-    resolution.resultTier = "light";
-    pushStateTransition(
-      resolution.stateTransitions,
-      attacker.owner,
-      attacker.slot,
-      attacker.state,
-      "light",
-    );
-    resolution.logs.push(`${defender.card.name} denies the entry.`);
-    addWinnerFocus(resolution, defender.owner, "light");
-    setRoundFlags(resolution);
-    return;
+  if (totalForce >= 70) {
+    applyTeamStoredForceDelta(team, 1);
   }
-
-  const power = powerClash(
-    attacker,
-    defender,
-    attackerAction,
-    defenderAction,
-    attackerSkill,
-    defenderSkill,
-  );
-
-  resolution.secondaryClash = "PowerClash";
-  resolution.clashes.push(power);
-
-  if (power.winnerSide !== attacker.owner) {
-    resolution.winnerSide = defender.owner;
-    resolution.resultTier = "light";
-    pushStateTransition(
-      resolution.stateTransitions,
-      attacker.owner,
-      attacker.slot,
-      attacker.state,
-      "light",
-    );
-    resolution.logs.push(`${defender.card.name} absorbs the contact and turns the exchange.`);
-    addWinnerFocus(resolution, defender.owner, "light");
-    setRoundFlags(resolution);
-    return;
-  }
-
-  let tier = getTierFromDifference(power.difference);
-  tier = applyTierModifiers(tier, attackerSkill, defender);
-
-  if (reducedByOneStep) {
-    tier = shiftTier(tier, -1);
-  }
-
-  resolution.winnerSide = attacker.owner;
-  resolution.resultTier = tier;
-
-  pushStateTransition(
-    resolution.stateTransitions,
-    defender.owner,
-    applyToSlot,
-    defender.state,
-    tier,
-  );
-
-  addWinnerFocus(resolution, attacker.owner, tier);
-
-  if (tier !== "none") {
-    applyEnemySkillStatusesOnWin(
-      resolution,
-      attacker.owner,
-      defender.owner,
-      applyToSlot,
-      attackerSkill,
-    );
-  }
-
-  setRoundFlags(resolution);
 }
 
-function resolveStrikeVsStrike(
-  resolution: ArenaClashExchangeResolution,
-  playerCard: ArenaClashBattleCardRuntime,
-  enemyCard: ArenaClashBattleCardRuntime,
-  playerAction: ArenaClashActionSelection,
-  enemyAction: ArenaClashActionSelection,
-  playerSkill: ArenaClashSkillDefinition | null,
-  enemySkill: ArenaClashSkillDefinition | null,
-) {
-  const speed = speedClash(
-    playerCard,
-    enemyCard,
-    playerAction,
-    enemyAction,
-    playerSkill,
-    enemySkill,
-  );
+export function cleanupEndOfRound(
+  state: ArenaClashMatchState,
+): ArenaClashMatchState {
+  const next = cloneMatchState(state);
 
-  resolution.primaryClash = "SpeedClash";
-  resolution.clashes.push(speed);
+  generateStoredForce(next.player);
+  generateStoredForce(next.enemy);
 
-  const mutualPressureWindow = speed.difference <= 3;
+  tickTeamForNewRound(next.player);
+  tickTeamForNewRound(next.enemy);
 
-  if (speed.winnerSide === "draw" && mutualPressureWindow) {
-    resolution.winnerSide = "draw";
-    resolution.resultTier = "light";
-    pushStateTransition(
-      resolution.stateTransitions,
-      "player",
-      playerCard.slot,
-      playerCard.state,
-      "light",
-    );
-    pushStateTransition(
-      resolution.stateTransitions,
-      "enemy",
-      enemyCard.slot,
-      enemyCard.state,
-      "light",
-    );
-    resolution.logs.push("Both fighters collide in a messy simultaneous exchange.");
-    setRoundFlags(resolution);
-    return;
+  next.queuedPlayerCommands = [];
+  next.queuedEnemyCommands = [];
+
+  if (next.phase !== "finished") {
+    next.phase = "command";
+    next.roundNumber += 1;
   }
 
-  const attacker = speed.winnerSide === "enemy" ? enemyCard : playerCard;
-  const defender = attacker.owner === "player" ? enemyCard : playerCard;
-  const attackerAction = attacker.owner === "player" ? playerAction : enemyAction;
-  const defenderAction = defender.owner === "player" ? playerAction : enemyAction;
-  const attackerSkill = attacker.owner === "player" ? playerSkill : enemySkill;
-  const defenderSkill = defender.owner === "player" ? playerSkill : enemySkill;
-
-  resolveStrikeLikeSequence({
-    resolution,
-    attacker,
-    defender,
-    attackerAction,
-    defenderAction,
-    attackerSkill,
-    defenderSkill,
-    applyToSlot: defender.slot,
-  });
+  return next;
 }
 
-function resolveCounterVsAggression(
-  resolution: ArenaClashExchangeResolution,
-  counterer: ArenaClashBattleCardRuntime,
-  incoming: ArenaClashBattleCardRuntime,
-  counterAction: ArenaClashActionSelection,
-  incomingAction: ArenaClashActionSelection,
-  counterSkill: ArenaClashSkillDefinition | null,
-  incomingSkill: ArenaClashSkillDefinition | null,
-) {
-  const reversal = reversalClash(
-    counterer,
-    incoming,
-    counterAction,
-    incomingAction,
-    counterSkill,
-    incomingSkill,
-  );
+export function resolveArenaClashRound(
+  state: ArenaClashMatchState,
+): ArenaClashMatchState {
+  let next = cloneMatchState(state);
 
-  resolution.primaryClash = "ReversalClash";
-  resolution.clashes.push(reversal);
+  if (next.phase === "finished") return next;
 
-  if (reversal.winnerSide === counterer.owner) {
-    let tier = getTierFromDifference(reversal.difference);
-    tier = applyTierModifiers(tier, counterSkill, incoming);
-
-    resolution.winnerSide = counterer.owner;
-    resolution.resultTier = tier;
-
-    pushStateTransition(
-      resolution.stateTransitions,
-      incoming.owner,
-      incoming.slot,
-      incoming.state,
-      tier,
-    );
-
-    addWinnerFocus(resolution, counterer.owner, tier);
-
-    if (tier !== "none") {
-      applyEnemySkillStatusesOnWin(
-        resolution,
-        counterer.owner,
-        incoming.owner,
-        incoming.slot,
-        counterSkill,
-      );
-    }
-
-    resolution.logs.push(`${counterer.card.name} successfully reverses the aggression.`);
-  } else if (reversal.winnerSide === incoming.owner) {
-    let tier = getTierFromDifference(reversal.difference);
-    tier = applyTierModifiers(tier, incomingSkill, counterer);
-
-    resolution.winnerSide = incoming.owner;
-    resolution.resultTier = tier;
-
-    pushStateTransition(
-      resolution.stateTransitions,
-      counterer.owner,
-      counterer.slot,
-      counterer.state,
-      tier,
-    );
-
-    addWinnerFocus(resolution, incoming.owner, tier);
-    resolution.logs.push(`${incoming.card.name} overwhelms the counter timing.`);
-  } else {
-    resolution.winnerSide = "draw";
-    resolution.resultTier = "none";
-    resolution.logs.push("The reversal timing is read and neutralized.");
+  if (next.phase === "deploy") {
+    return resolveDeployPhase(next);
   }
 
-  setRoundFlags(resolution);
-}
-
-function resolveSwitchCheck(
-  incomingCard: ArenaClashBattleCardRuntime,
-  attacker: ArenaClashBattleCardRuntime,
-  incomingAction: ArenaClashActionSelection,
-  attackerAction: ArenaClashActionSelection,
-  attackerSkill: ArenaClashSkillDefinition | null,
-): ArenaClashSnapshot {
-  const incomingStats = getStatsForClash({
-    actor: incomingCard,
-    actorAction: incomingAction,
-    actorSkill: null,
-    clashKind: "SwitchCheck",
-    isAttacker: false,
-    actorSide: incomingCard.owner,
-    enemyAction: attackerAction,
-  });
-
-  const attackerStats = getStatsForClash({
-    actor: attacker,
-    actorAction: attackerAction,
-    actorSkill: attackerSkill,
-    clashKind: "SpeedClash",
-    isAttacker: true,
-    actorSide: attacker.owner,
-    enemyAction: incomingAction,
-  });
-
-  const incomingValue = incomingStats.SPD * 0.6 + incomingStats.INSTINCT * 0.4;
-  const attackerValue = attackerStats.SPD * 0.6 + attackerStats.INSTINCT * 0.4;
-
-  return buildClashSnapshot(
-    "SwitchCheck",
-    attacker.owner,
-    incomingCard.owner,
-    attackerValue,
-    incomingValue,
-  );
-}
-
-function spendSwitchTempo(
-  resolution: ArenaClashExchangeResolution,
-  switchingTeam: ArenaClashTeamState,
-  slot: number,
-) {
-  const incoming = switchingTeam.fighters[slot];
-  const cost = getArenaClashTempoCostByRarity(incoming.rarity);
-
-  if (switchingTeam.side === "player") {
-    resolution.tempoChanges.player -= cost;
-  } else {
-    resolution.tempoChanges.enemy -= cost;
+  if (next.phase === "enemy-deploy") {
+    return resolveEnemyDeployPhase(next);
   }
 
-  resolution.logs.push(
-    `${switchingTeam.side} spends ${cost} Tempo to switch in ${incoming.card.name}.`,
-  );
-}
-
-function resolveSwitchVsStrikeLike(params: {
-  resolution: ArenaClashExchangeResolution;
-  switchingTeam: ArenaClashTeamState;
-  attackingTeam: ArenaClashTeamState;
-  switchAction: ArenaClashActionSelection;
-  attackAction: ArenaClashActionSelection;
-  attackSkill: ArenaClashSkillDefinition | null;
-  attackCard: ArenaClashBattleCardRuntime;
-  oldActive: ArenaClashBattleCardRuntime;
-}) {
-  const {
-    resolution,
-    switchingTeam,
-    switchAction,
-    attackAction,
-    attackSkill,
-    attackCard,
-    oldActive,
-  } = params;
-
-  const targetSlot = switchAction.targetReserveSlot!;
-  const incoming = switchingTeam.fighters[targetSlot];
-
-  spendSwitchTempo(resolution, switchingTeam, targetSlot);
-
-  const check = resolveSwitchCheck(
-    incoming,
-    attackCard,
-    switchAction,
-    attackAction,
-    attackSkill,
-  );
-
-  resolution.primaryClash = "SwitchCheck";
-  resolution.clashes.push(check);
-
-  const switchSucceeded = check.winnerSide === switchingTeam.side;
-
-  if (switchSucceeded) {
-    resolution.logs.push(`${incoming.card.name} enters in time and catches a weakened hit.`);
-
-    resolveStrikeLikeSequence({
-      resolution,
-      attacker: attackCard,
-      defender: incoming,
-      attackerAction: attackAction,
-      defenderAction: switchAction,
-      attackerSkill: attackSkill,
-      defenderSkill: null,
-      applyToSlot: incoming.slot,
-      reducedByOneStep: true,
-    });
-
-    return;
+  if (next.queuedEnemyCommands.length === 0) {
+    next.queuedEnemyCommands = buildEnemyAutoCommands(next);
   }
 
-  resolution.logs.push(`${oldActive.card.name} fails to disengage and takes the full punish.`);
+  resetTeamRoundCounters(next.player);
+  resetTeamRoundCounters(next.enemy);
 
-  resolveStrikeLikeSequence({
-    resolution,
-    attacker: attackCard,
-    defender: oldActive,
-    attackerAction: attackAction,
-    defenderAction: switchAction,
-    attackerSkill: attackSkill,
-    defenderSkill: null,
-    applyToSlot: oldActive.slot,
-  });
-}
+  next = resolveSwitchPhase(next);
+  next = resolveSupportPhase(next);
+  next = resolveGuardChargePhase(next);
+  next = resolveStrikePhase(next);
+  next = resolveBurstPhase(next);
+  next = resolveBreakPhase(next);
 
-export function resolveArenaClashExchange({
-  playerTeam,
-  enemyTeam,
-  playerAction,
-  enemyAction,
-  exchangeNumber,
-}: ArenaClashResolverInput): ArenaClashExchangeResolution {
-  const playerCard = getArenaClashActiveCard(playerTeam);
-  const enemyCard = getArenaClashActiveCard(enemyTeam);
-
-  const normalizedPlayer = normalizeActionForSide(
-    playerTeam,
-    enemyTeam,
-    "player",
-    playerAction,
-  );
-  const normalizedEnemy = normalizeActionForSide(
-    enemyTeam,
-    playerTeam,
-    "enemy",
-    enemyAction,
-  );
-
-  const resolution = buildBaseResolution(
-    exchangeNumber,
-    normalizedPlayer.action,
-    normalizedEnemy.action,
-  );
-
-  resolution.logs.push(...normalizedPlayer.logs, ...normalizedEnemy.logs);
-
-  applySelfSkillCostsAndStatuses(
-    resolution,
-    "player",
-    playerCard,
-    normalizedPlayer.skill,
-  );
-  applySelfSkillCostsAndStatuses(
-    resolution,
-    "enemy",
-    enemyCard,
-    normalizedEnemy.skill,
-  );
-
-  const pAction = normalizedPlayer.action;
-  const eAction = normalizedEnemy.action;
-  const pSkill = normalizedPlayer.skill;
-  const eSkill = normalizedEnemy.skill;
-
-  if (pAction.type === "Charge") {
-    resolution.focusChanges.player += 1;
-    if (playerCard.chargeStreak >= 1) {
-      pushUniqueStatus(resolution.statusApplications, "player", playerCard.slot, "TempoDown");
-      resolution.logs.push("player overuses Charge and suffers TempoDown.");
-    }
+  if (next.phase === "finished") {
+    return next;
   }
 
-  if (eAction.type === "Charge") {
-    resolution.focusChanges.enemy += 1;
-    if (enemyCard.chargeStreak >= 1) {
-      pushUniqueStatus(resolution.statusApplications, "enemy", enemyCard.slot, "TempoDown");
-      resolution.logs.push("enemy overuses Charge and suffers TempoDown.");
-    }
-  }
-
-  if (pAction.type === "Guard" && playerCard.guardStreak >= 2) {
-    resolution.logs.push("player is guard-spamming; later engine can weaken the stance.");
-  }
-
-  if (eAction.type === "Guard" && enemyCard.guardStreak >= 2) {
-    resolution.logs.push("enemy is guard-spamming; later engine can weaken the stance.");
-  }
-
-  if (pAction.type === "Guard" && eAction.type === "Guard") {
-    resolution.focusChanges.player += 1;
-    resolution.focusChanges.enemy += 1;
-    resolution.logs.push("Both fighters remain patient and build Focus.");
-    return resolution;
-  }
-
-  if (pAction.type === "Charge" && eAction.type === "Charge") {
-    resolution.logs.push("Both fighters charge and prepare a bigger future exchange.");
-    return resolution;
-  }
-
-  if (pAction.type === "Guard" && eAction.type === "Charge") {
-    resolution.focusChanges.player += 1;
-    resolution.logs.push("player stabilizes while enemy charges.");
-    return resolution;
-  }
-
-  if (pAction.type === "Charge" && eAction.type === "Guard") {
-    resolution.focusChanges.enemy += 1;
-    resolution.logs.push("enemy stabilizes while player charges.");
-    return resolution;
-  }
-
-  if (pAction.type === "Switch" && eAction.type === "Guard") {
-    spendSwitchTempo(resolution, playerTeam, pAction.targetReserveSlot!);
-    resolution.focusChanges.enemy += 1;
-    resolution.logs.push("player safely switches under guard pressure.");
-    return resolution;
-  }
-
-  if (eAction.type === "Switch" && pAction.type === "Guard") {
-    spendSwitchTempo(resolution, enemyTeam, eAction.targetReserveSlot!);
-    resolution.focusChanges.player += 1;
-    resolution.logs.push("enemy safely switches under guard pressure.");
-    return resolution;
-  }
-
-  if (pAction.type === "Switch" && eAction.type === "Charge") {
-    spendSwitchTempo(resolution, playerTeam, pAction.targetReserveSlot!);
-    resolution.logs.push("player safely switches while enemy charges.");
-    return resolution;
-  }
-
-  if (eAction.type === "Switch" && pAction.type === "Charge") {
-    spendSwitchTempo(resolution, enemyTeam, eAction.targetReserveSlot!);
-    resolution.logs.push("enemy safely switches while player charges.");
-    return resolution;
-  }
-
-  if (pAction.type === "Switch" && eAction.type === "Switch") {
-    spendSwitchTempo(resolution, playerTeam, pAction.targetReserveSlot!);
-    spendSwitchTempo(resolution, enemyTeam, eAction.targetReserveSlot!);
-    resolution.logs.push("Both players switch at the same time.");
-    return resolution;
-  }
-
-  if (pAction.type === "Strike" && eAction.type === "Strike") {
-    resolveStrikeVsStrike(
-      resolution,
-      playerCard,
-      enemyCard,
-      pAction,
-      eAction,
-      pSkill,
-      eSkill,
-    );
-    return resolution;
-  }
-
-  if (pAction.type === "Strike" && eAction.type === "Guard") {
-    resolveStrikeLikeSequence({
-      resolution,
-      attacker: playerCard,
-      defender: enemyCard,
-      attackerAction: pAction,
-      defenderAction: eAction,
-      attackerSkill: pSkill,
-      defenderSkill: eSkill,
-      applyToSlot: enemyCard.slot,
-    });
-
-    if (resolution.winnerSide !== "player") {
-      resolution.focusChanges.enemy += 1;
-    }
-
-    return resolution;
-  }
-
-  if (eAction.type === "Strike" && pAction.type === "Guard") {
-    resolveStrikeLikeSequence({
-      resolution,
-      attacker: enemyCard,
-      defender: playerCard,
-      attackerAction: eAction,
-      defenderAction: pAction,
-      attackerSkill: eSkill,
-      defenderSkill: pSkill,
-      applyToSlot: playerCard.slot,
-    });
-
-    if (resolution.winnerSide !== "enemy") {
-      resolution.focusChanges.player += 1;
-    }
-
-    return resolution;
-  }
-
-  if (pAction.type === "Strike" && eAction.type === "Charge") {
-    resolveStrikeLikeSequence({
-      resolution,
-      attacker: playerCard,
-      defender: enemyCard,
-      attackerAction: pAction,
-      defenderAction: eAction,
-      attackerSkill: pSkill,
-      defenderSkill: eSkill,
-      applyToSlot: enemyCard.slot,
-    });
-    return resolution;
-  }
-
-  if (eAction.type === "Strike" && pAction.type === "Charge") {
-    resolveStrikeLikeSequence({
-      resolution,
-      attacker: enemyCard,
-      defender: playerCard,
-      attackerAction: eAction,
-      defenderAction: pAction,
-      attackerSkill: eSkill,
-      defenderSkill: pSkill,
-      applyToSlot: playerCard.slot,
-    });
-    return resolution;
-  }
-
-  if (pAction.type === "Strike" && eAction.type === "Switch") {
-    resolveSwitchVsStrikeLike({
-      resolution,
-      switchingTeam: enemyTeam,
-      attackingTeam: playerTeam,
-      switchAction: eAction,
-      attackAction: pAction,
-      attackSkill: pSkill,
-      attackCard: playerCard,
-      oldActive: enemyCard,
-    });
-    return resolution;
-  }
-
-  if (eAction.type === "Strike" && pAction.type === "Switch") {
-    resolveSwitchVsStrikeLike({
-      resolution,
-      switchingTeam: playerTeam,
-      attackingTeam: enemyTeam,
-      switchAction: pAction,
-      attackAction: eAction,
-      attackSkill: eSkill,
-      attackCard: enemyCard,
-      oldActive: playerCard,
-    });
-    return resolution;
-  }
-
-  if (
-    pAction.type === "Skill" &&
-    isCounterSkill(pSkill) &&
-    (eAction.type === "Strike" || (eAction.type === "Skill" && isAggressiveSkill(eSkill)))
-  ) {
-    resolveCounterVsAggression(
-      resolution,
-      playerCard,
-      enemyCard,
-      pAction,
-      eAction,
-      pSkill,
-      eSkill,
-    );
-    return resolution;
-  }
-
-  if (
-    eAction.type === "Skill" &&
-    isCounterSkill(eSkill) &&
-    (pAction.type === "Strike" || (pAction.type === "Skill" && isAggressiveSkill(pSkill)))
-  ) {
-    resolveCounterVsAggression(
-      resolution,
-      enemyCard,
-      playerCard,
-      eAction,
-      pAction,
-      eSkill,
-      pSkill,
-    );
-    return resolution;
-  }
-
-  if (pAction.type === "Skill" && eAction.type === "Guard") {
-    if (isCounterSkill(pSkill)) {
-      resolution.focusChanges.enemy += 1;
-      resolution.logs.push("Counter skill finds no real opening into Guard.");
-      return resolution;
-    }
-
-    const defenderSkill = isStanceSkill(eSkill) ? eSkill : null;
-
-    resolveStrikeLikeSequence({
-      resolution,
-      attacker: playerCard,
-      defender: enemyCard,
-      attackerAction: pAction,
-      defenderAction: eAction,
-      attackerSkill: pSkill,
-      defenderSkill,
-      applyToSlot: enemyCard.slot,
-    });
-
-    if (resolution.winnerSide !== "player") {
-      resolution.focusChanges.enemy += 1;
-    }
-
-    return resolution;
-  }
-
-  if (eAction.type === "Skill" && pAction.type === "Guard") {
-    if (isCounterSkill(eSkill)) {
-      resolution.focusChanges.player += 1;
-      resolution.logs.push("Counter skill finds no real opening into Guard.");
-      return resolution;
-    }
-
-    const defenderSkill = isStanceSkill(pSkill) ? pSkill : null;
-
-    resolveStrikeLikeSequence({
-      resolution,
-      attacker: enemyCard,
-      defender: playerCard,
-      attackerAction: eAction,
-      defenderAction: pAction,
-      attackerSkill: eSkill,
-      defenderSkill,
-      applyToSlot: playerCard.slot,
-    });
-
-    if (resolution.winnerSide !== "enemy") {
-      resolution.focusChanges.player += 1;
-    }
-
-    return resolution;
-  }
-
-  if (pAction.type === "Skill" && eAction.type === "Charge") {
-    if (isCounterSkill(pSkill) || isStanceSkill(pSkill)) {
-      resolution.logs.push("The skill does not convert well into a charging target.");
-      return resolution;
-    }
-
-    resolveStrikeLikeSequence({
-      resolution,
-      attacker: playerCard,
-      defender: enemyCard,
-      attackerAction: pAction,
-      defenderAction: eAction,
-      attackerSkill: pSkill,
-      defenderSkill: eSkill,
-      applyToSlot: enemyCard.slot,
-    });
-
-    return resolution;
-  }
-
-  if (eAction.type === "Skill" && pAction.type === "Charge") {
-    if (isCounterSkill(eSkill) || isStanceSkill(eSkill)) {
-      resolution.logs.push("The skill does not convert well into a charging target.");
-      return resolution;
-    }
-
-    resolveStrikeLikeSequence({
-      resolution,
-      attacker: enemyCard,
-      defender: playerCard,
-      attackerAction: eAction,
-      defenderAction: pAction,
-      attackerSkill: eSkill,
-      defenderSkill: pSkill,
-      applyToSlot: playerCard.slot,
-    });
-
-    return resolution;
-  }
-
-  if (pAction.type === "Skill" && eAction.type === "Switch") {
-    if (isCounterSkill(pSkill)) {
-      spendSwitchTempo(resolution, enemyTeam, eAction.targetReserveSlot!);
-      resolution.logs.push("Counter skill loses value against a switch.");
-      return resolution;
-    }
-
-    resolveSwitchVsStrikeLike({
-      resolution,
-      switchingTeam: enemyTeam,
-      attackingTeam: playerTeam,
-      switchAction: eAction,
-      attackAction: pAction,
-      attackSkill: pSkill,
-      attackCard: playerCard,
-      oldActive: enemyCard,
-    });
-    return resolution;
-  }
-
-  if (eAction.type === "Skill" && pAction.type === "Switch") {
-    if (isCounterSkill(eSkill)) {
-      spendSwitchTempo(resolution, playerTeam, pAction.targetReserveSlot!);
-      resolution.logs.push("Counter skill loses value against a switch.");
-      return resolution;
-    }
-
-    resolveSwitchVsStrikeLike({
-      resolution,
-      switchingTeam: playerTeam,
-      attackingTeam: enemyTeam,
-      switchAction: pAction,
-      attackAction: eAction,
-      attackSkill: eSkill,
-      attackCard: enemyCard,
-      oldActive: playerCard,
-    });
-    return resolution;
-  }
-
-  if (pAction.type === "Skill" && eAction.type === "Strike") {
-    if (isStanceSkill(pSkill)) {
-      resolveStrikeLikeSequence({
-        resolution,
-        attacker: enemyCard,
-        defender: playerCard,
-        attackerAction: eAction,
-        defenderAction: pAction,
-        attackerSkill: eSkill,
-        defenderSkill: pSkill,
-        applyToSlot: playerCard.slot,
-      });
-      return resolution;
-    }
-
-    if (isAggressiveSkill(pSkill)) {
-      resolveStrikeVsStrike(
-        resolution,
-        playerCard,
-        enemyCard,
-        pAction,
-        eAction,
-        pSkill,
-        eSkill,
-      );
-      return resolution;
-    }
-  }
-
-  if (eAction.type === "Skill" && pAction.type === "Strike") {
-    if (isStanceSkill(eSkill)) {
-      resolveStrikeLikeSequence({
-        resolution,
-        attacker: playerCard,
-        defender: enemyCard,
-        attackerAction: pAction,
-        defenderAction: eAction,
-        attackerSkill: pSkill,
-        defenderSkill: eSkill,
-        applyToSlot: enemyCard.slot,
-      });
-      return resolution;
-    }
-
-    if (isAggressiveSkill(eSkill)) {
-      resolveStrikeVsStrike(
-        resolution,
-        playerCard,
-        enemyCard,
-        pAction,
-        eAction,
-        pSkill,
-        eSkill,
-      );
-      return resolution;
-    }
-  }
-
-  if (pAction.type === "Skill" && eAction.type === "Skill") {
-    if (isCounterSkill(pSkill) && isAggressiveSkill(eSkill)) {
-      resolveCounterVsAggression(
-        resolution,
-        playerCard,
-        enemyCard,
-        pAction,
-        eAction,
-        pSkill,
-        eSkill,
-      );
-      return resolution;
-    }
-
-    if (isCounterSkill(eSkill) && isAggressiveSkill(pSkill)) {
-      resolveCounterVsAggression(
-        resolution,
-        enemyCard,
-        playerCard,
-        eAction,
-        pAction,
-        eSkill,
-        pSkill,
-      );
-      return resolution;
-    }
-
-    resolveStrikeVsStrike(
-      resolution,
-      playerCard,
-      enemyCard,
-      pAction,
-      eAction,
-      pSkill,
-      eSkill,
-    );
-    return resolution;
-  }
-
-  resolution.logs.push("Fallback resolution: no special branch matched.");
-  return resolution;
-}
-
-export function getArenaClashResolvedFocusAfterExchange(
-  currentFocus: number,
-  delta: number,
-): number {
-  return clampArenaClashFocus(currentFocus + delta);
+  next = cleanupEndOfRound(next);
+  return next;
 }
