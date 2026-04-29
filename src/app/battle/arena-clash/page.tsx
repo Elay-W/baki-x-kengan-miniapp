@@ -41,12 +41,6 @@ import type {
   ArenaClashRuntimeUnit,
 } from "@/lib/arenaClashTypes";
 
-type DraftCommand = {
-  action: ArenaClashActionType;
-  useSignature?: boolean;
-  chosenReserveUid?: string;
-};
-
 const surface = {
   background:
     "linear-gradient(180deg, rgba(16,16,20,0.98) 0%, rgba(9,9,12,0.98) 100%)",
@@ -444,7 +438,7 @@ export default function ArenaClashPage() {
         skill &&
         canUseSignatureSkill({
           unit,
-          currentRow: unit.slotId ? "front" === unit.slotId.split("_")[0] ? "front" : "core" : "reserve",
+          currentRow: unit.slotId ? (unit.slotId.startsWith("front_") ? "front" : "core") : "reserve",
           phase: state.phase,
           teamSignaturesUsedThisRound: state.player.signaturesUsedThisRound,
         });
@@ -1072,6 +1066,12 @@ export default function ArenaClashPage() {
     </main>
   );
 }
+
+type DraftCommand = {
+  action: ArenaClashActionType;
+  useSignature?: boolean;
+  chosenReserveUid?: string;
+};
 
 const eyebrow: React.CSSProperties = {
   fontSize: 12,

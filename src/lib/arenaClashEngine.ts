@@ -27,7 +27,6 @@ import type {
   ArenaClashSupportCard,
   ArenaClashTeamState,
 } from "@/lib/arenaClashTypes";
-
 import type { FighterCard } from "@/types/game";
 
 export function clamp(value: number, min = 0, max = 999999): number {
